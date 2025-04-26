@@ -75,6 +75,7 @@ contract LendingPoolContract is ReentrancyGuard {
     );
     error LendingPoolContract__LoanStillPending();
     error LendingPoolContract__LoanAmountExceeded();
+    error LendingPoolContract__InvalidRequestAmount();
     ////////////////////
     // State Variable
     ////////////////////
@@ -224,6 +225,12 @@ contract LendingPoolContract is ReentrancyGuard {
         uint256 amount
     );
 
+    event CollateralWithdrawed(
+        address indexed user,
+        address indexed token,
+        uint256 amount
+    );
+
     /**
      *
      *  @dev Emitted when a user deposits liquidity into the protocol
@@ -284,7 +291,7 @@ contract LendingPoolContract is ReentrancyGuard {
     }
 
     /// @dev this prevent the user from depositing money from chains that is not supported on this contract
-    modifier isTokenAllowedToDeposit(address token) {
+    modifier isTokenApprovedByTheContract(address token) {
         if (s_priceFeed[token] == address(0)) {
             revert LendingPoolContract__TokenIsNotAllowedToDeposit(token);
         }
@@ -365,7 +372,7 @@ contract LendingPoolContract is ReentrancyGuard {
         external
         payable
         isGreaterThanZero(amount)
-        isTokenAllowedToDeposit(token)
+        isTokenApprovedByTheContract(token)
         nonReentrant
     {
         //safeTraansfer function is used instead of the normal transfer,it ensures that the user has approved necessery funds for the contract
@@ -407,12 +414,12 @@ contract LendingPoolContract is ReentrancyGuard {
     ///
     /// @dev The following conditions are verified before processing the deposit:
     /// - The deposit amount must be greater than zero, enforced by the `isGreaterThanZero(amount)` modifier.
-    /// - The token being deposited must be one that is allowed for collateral, enforced by the `isTokenAllowedToDeposit(token)` modifier.
+    /// - The token being deposited must be one that is allowed for collateral, enforced by the `isTokenApprovedByTheContract(token)` modifier.
     /// - The function is protected against reentrancy attacks by the `nonReentrant` modifier.
     ///
     /// @custom:security non-reentrant Ensures that the function cannot be called recursively.
     /// @custom:modifier isGreaterThanZero(amount) Validates that the deposit amount is greater than zero.
-    /// @custom:modifier isTokenAllowedToDeposit(token) Ensures that the specified token is allowed for collateral deposit.
+    /// @custom:modifier isTokenApprovedByTheContract(token) Ensures that the specified token is allowed for collateral deposit.
 
     function depositCollateral(
         address token,
@@ -421,7 +428,7 @@ contract LendingPoolContract is ReentrancyGuard {
         external
         payable
         isGreaterThanZero(amount)
-        isTokenAllowedToDeposit(token)
+        isTokenApprovedByTheContract(token)
         nonReentrant
     {
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
@@ -441,7 +448,7 @@ contract LendingPoolContract is ReentrancyGuard {
      *
      * Requirements:
      * - The `amount` must be greater than zero. (Enforced by `isGreaterThanZero` modifier)
-     * - The `token` must be an allowed token for deposits. (Enforced by `isTokenAllowedToDeposit` modifier)
+     * - The `token` must be an allowed token for deposits. (Enforced by `isTokenApprovedByTheContract` modifier)
      * - The user must have a sufficient deposit balance to cover the withdrawal amount.
      *
      * Errors:
@@ -459,7 +466,7 @@ contract LendingPoolContract is ReentrancyGuard {
     )
         external
         isGreaterThanZero(amount)
-        isTokenAllowedToDeposit(token)
+        isTokenApprovedByTheContract(token)
         nonReentrant
     {
         uint256 depositAmount = s_depositDetailsOfUser[msg.sender][token];
@@ -525,19 +532,19 @@ contract LendingPoolContract is ReentrancyGuard {
     ///
     /// @dev The following checks and operations are performed:
     /// - The amount must be greater than zero (checked via the `isGreaterThanZero` modifier).
-    /// - The token must be allowed for collateral (checked via the `isTokenAllowedToDeposit` modifier).
+    /// - The token must be allowed for collateral (checked via the `isTokenApprovedByTheContract` modifier).
     /// - The user's previous loan must be cleared, or else the request will be rejected.
     /// - The function ensures that the user has enough collateral to borrow the requested amount based on the LTV ratio.
     /// - Updates the loan details, including collateral used and due date. The collateral is moved from the available to locked balance.
     /// - The loan amount is transferred to the user in the form of a stablecoin.
 
     /// @custom:modifier isGreaterThanZero(amount) Ensures that the loan amount is greater than zero.
-    /// @custom:modifier isTokenAllowedToDeposit(token) Ensures that the token is allowed to be used for collateral deposit.
+    /// @custom:modifier isTokenApprovedByTheContract(token) Ensures that the token is allowed to be used for collateral deposit.
 
     function borrowLoan(
         address token,
         uint256 amount
-    ) external isGreaterThanZero(amount) isTokenAllowedToDeposit(token) {
+    ) external isGreaterThanZero(amount) isTokenApprovedByTheContract(token) {
         if (s_loanDetails[msg.sender][token].amountBorrowedInUSDT > 0) {
             revert LendingPoolContract__LoanPending();
         }
@@ -640,7 +647,7 @@ contract LendingPoolContract is ReentrancyGuard {
         uint256 amount
     )
         external
-        isTokenAllowedToDeposit(token)
+        isTokenApprovedByTheContract(token)
         isGreaterThanZero(amount)
         nonReentrant
     {
@@ -690,6 +697,24 @@ contract LendingPoolContract is ReentrancyGuard {
             interestPaidNow,
             principalRepaid
         );
+    }
+
+    function withdrawCollateral(
+        address token,
+        uint256 amount
+    )
+        external
+        isTokenApprovedByTheContract(token)
+        isGreaterThanZero(amount)
+        nonReentrant
+    {
+        if (s_collateralDetails[msg.sender][token] < amount) {
+            revert LendingPoolContract__InvalidRequestAmount();
+        }
+        s_collateralDetails[msg.sender][token] -= amount;
+        s_tokenCollateral[token] -= amount;
+        IERC20(token).safeTransfer(msg.sender, amount);
+        emit CollateralWithdrawed(msg.sender, token, amount);
     }
 
     ////////////////////
