@@ -35,6 +35,12 @@ contract LendingPoolContractTest is Test {
         uint256 amount
     );
 
+    event CollateralWithdrawed(
+        address indexed user,
+        address indexed token,
+        uint256 amount
+    );
+
     function setUp() public {
         DeployLendingPoolContract deployLendingPoolContract = new DeployLendingPoolContract();
         (
@@ -75,7 +81,7 @@ contract LendingPoolContractTest is Test {
     }
 
     // testing of the deposit function
-    function testDepoistLiquidityExpectingRevertBecauseTheAmountPassedIsZero()
+    function testDepositLiquidityExpectingRevertBecauseTheAmountPassedIsZero()
         public
     {
         vm.startPrank(user);
@@ -104,7 +110,7 @@ contract LendingPoolContractTest is Test {
         vm.stopPrank();
     }
 
-    //unit testing for the depositt function
+    //unit testing for the deposit function
     // testing the function for the first user
     function testDepositLiquidityUnitTest() public {
         uint256 initalLiquidity = lendingPoolContract.getTotalLiquidityPerToken(
@@ -225,5 +231,215 @@ contract LendingPoolContractTest is Test {
             )
         );
         lendingPoolContract.withdrawDeposit(weth, DEPOSITING_AMOUNT * 2);
+    }
+
+    // TESTING THE DEPOSIT COLLATERAL FUNCTION
+
+    function testDepositCollateralRevertBecauseTheTokenIsInvalid() public {
+        vm.startPrank(user);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "LendingPoolContract__TokenIsNotAllowedToDeposit(address)",
+                address(lpToken)
+            )
+        );
+        lendingPoolContract.depositCollateral(address(lpToken), 10);
+        vm.stopPrank();
+    }
+
+    function testDepositCollateralRevertBecauseAmountIsZero() public {
+        vm.startPrank(user);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "LendingPoolContract__AmountShouldBeGreaterThanZero()"
+            )
+        );
+        lendingPoolContract.depositCollateral(weth, 0);
+        vm.stopPrank();
+    }
+
+    function testDepositCollateralUnitTest() public {
+        vm.startPrank(user);
+        ERC20Mock(weth).approve(
+            address(lendingPoolContract),
+            DEPOSITING_AMOUNT
+        );
+        uint256 initalUserBalance = ERC20Mock(weth).balanceOf(user);
+        uint256 initalDepositedCollateralByUser = lendingPoolContract
+            .getCollateralDetailsOfUser(weth);
+        uint256 initalTotalCollateralDeposited = lendingPoolContract
+            .getCollateralPerToken(weth);
+        lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
+        uint256 finalUserBalance = ERC20Mock(weth).balanceOf(user);
+        uint256 finalDepositedCollateralByUser = lendingPoolContract
+            .getCollateralDetailsOfUser(weth);
+        uint256 finalTotalCollateralDeposited = lendingPoolContract
+            .getCollateralPerToken(weth);
+        assertEq(initalUserBalance - finalUserBalance, DEPOSITING_AMOUNT);
+        assertEq(
+            finalDepositedCollateralByUser - initalDepositedCollateralByUser,
+            DEPOSITING_AMOUNT
+        );
+        assertEq(
+            finalTotalCollateralDeposited - initalTotalCollateralDeposited,
+            DEPOSITING_AMOUNT
+        );
+    }
+
+    function testWithDrawCollateralRevertBecauseAmountIsZero() public {
+        vm.startPrank(user);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "LendingPoolContract__AmountShouldBeGreaterThanZero()"
+            )
+        );
+        lendingPoolContract.withdrawCollateral(weth, 0);
+        vm.stopPrank();
+    }
+
+    function testWithdrawCollateralRevertBecauseTokenIsInvalid() public {
+        vm.startPrank(user);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "LendingPoolContract__TokenIsNotAllowedToDeposit(address)",
+                address(lpToken)
+            )
+        );
+        lendingPoolContract.withdrawCollateral(address(lpToken), 10);
+        vm.stopPrank();
+    }
+
+    function testWithdrawCollateralRevertBecauseNoCollateralDeposited() public {
+        vm.startPrank(user);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "LendingPoolContract__InvalidRequestAmount()"
+            )
+        );
+        lendingPoolContract.withdrawCollateral(weth, 10);
+        vm.stopPrank();
+    }
+
+    function testWithDrawCollateralUnitTest() public {
+        vm.startPrank(user);
+        ERC20Mock(weth).approve(
+            address(lendingPoolContract),
+            DEPOSITING_AMOUNT
+        );
+        lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
+        uint256 initalUserBalance = ERC20Mock(weth).balanceOf(user);
+        uint256 initalDepositedCollateralByUser = lendingPoolContract
+            .getCollateralDetailsOfUser(weth);
+        uint256 initalTotalCollateralDeposited = lendingPoolContract
+            .getCollateralPerToken(weth);
+        lendingPoolContract.withdrawCollateral(weth, DEPOSITING_AMOUNT);
+        uint256 finalUserBalance = ERC20Mock(weth).balanceOf(user);
+        uint256 finalDepositedCollateralByUser = lendingPoolContract
+            .getCollateralDetailsOfUser(weth);
+        uint256 finalTotalCollateralDeposited = lendingPoolContract
+            .getCollateralPerToken(weth);
+        assertEq(initalUserBalance + DEPOSITING_AMOUNT, finalUserBalance);
+        assertEq(
+            initalDepositedCollateralByUser - DEPOSITING_AMOUNT,
+            finalDepositedCollateralByUser
+        );
+        assertEq(
+            initalTotalCollateralDeposited - DEPOSITING_AMOUNT,
+            finalTotalCollateralDeposited
+        );
+    }
+
+    // BORROWING LOAN TESTING
+
+    function testBorrowLoanRevertBecauseAmountIsZero() public {
+        vm.startPrank(user);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "LendingPoolContract__AmountShouldBeGreaterThanZero()"
+            )
+        );
+        lendingPoolContract.borrowLoan(weth, 0);
+        vm.stopPrank();
+    }
+
+    function testBorrowLoanRevertBecauseTokenIsInvalid() public {
+        vm.startPrank(user);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "LendingPoolContract__TokenIsNotAllowedToDeposit(address)",
+                address(lpToken)
+            )
+        );
+        lendingPoolContract.borrowLoan(address(lpToken), 10);
+        vm.stopPrank();
+    }
+
+    function testBorrowLoanRevertBecauseNoCollateralDeposited() public {
+        vm.startPrank(user);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "LendingPoolContract__NotEnoughCollateral()"
+            )
+        );
+        lendingPoolContract.borrowLoan(weth, 10);
+        vm.stopPrank();
+    }
+
+    function testBorrowLoanUnitTest() public {
+        vm.prank(address(lendingPoolContract));
+        ERC20Mock(address(stableCoin)).mint(
+            address(lendingPoolContract),
+            10000 ether
+        );
+        console.log(
+            ERC20Mock(address(stableCoin)).balanceOf(
+                address(lendingPoolContract)
+            )
+        );
+
+        console.log(address(stableCoin));
+
+        vm.startPrank(user);
+        ERC20Mock(weth).approve(
+            address(lendingPoolContract),
+            DEPOSITING_AMOUNT
+        );
+        lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
+        uint256 collateralAvailableForBorrowing = (DEPOSITING_AMOUNT * 75e16) /
+            1e18;
+        uint256 collateralAvailableForBorrowingInUsd = lendingPoolContract
+            .getUsdValue(weth, collateralAvailableForBorrowing);
+        uint256 initalUserBalance = ERC20Mock(address(stableCoin)).balanceOf(
+            user
+        );
+        uint256 initalTotalBorrowedForToken = lendingPoolContract
+            .getTotalBorroweedForAToken(weth);
+        uint256 initalTotalBorrowedInUsdInTheContract = lendingPoolContract
+            .totalBorrowed();
+        lendingPoolContract.borrowLoan(
+            weth,
+            collateralAvailableForBorrowingInUsd
+        );
+        uint256 finalUserBalance = ERC20Mock(address(stableCoin)).balanceOf(
+            user
+        );
+        uint256 finalTotalBorrowedForToken = lendingPoolContract
+            .getTotalBorroweedForAToken(weth);
+        uint256 finalTotalBorrowedInUsdInTheContract = lendingPoolContract
+            .totalBorrowed();
+        assertEq(
+            finalUserBalance - initalUserBalance,
+            collateralAvailableForBorrowingInUsd
+        );
+        assertEq(
+            finalTotalBorrowedForToken - initalTotalBorrowedForToken,
+            collateralAvailableForBorrowing
+        );
+        assertEq(
+            finalTotalBorrowedInUsdInTheContract -
+                initalTotalBorrowedInUsdInTheContract,
+            collateralAvailableForBorrowingInUsd
+        );
+        vm.stopPrank();
     }
 }

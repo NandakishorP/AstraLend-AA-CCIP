@@ -61,11 +61,7 @@ contract LendingPoolContract is ReentrancyGuard {
         uint256 amount,
         uint256 availableAmount
     );
-    error LendingPoolContract__NotEnoughCollateral(
-        address user,
-        address tokenAddress,
-        uint256 availableAmount
-    );
+    error LendingPoolContract__NotEnoughCollateral();
     error LendingPoolContract__LoanPending();
     error LendingPoolContract__TokenIsNotAllowedToDeposit(address token);
     error LendingPoolContract__AmountShouldBeGreaterThanZero();
@@ -558,11 +554,7 @@ contract LendingPoolContract is ReentrancyGuard {
             collateralAvailableForLending
         );
         if (amount > collateralAvailableForLendingInUsd) {
-            revert LendingPoolContract__NotEnoughCollateral(
-                msg.sender,
-                token,
-                collateralAvailableForLendingInUsd
-            );
+            revert LendingPoolContract__NotEnoughCollateral();
         }
         if (!s_isBorrower[msg.sender]) {
             borrowers.push(msg.sender);
@@ -698,6 +690,15 @@ contract LendingPoolContract is ReentrancyGuard {
             principalRepaid
         );
     }
+
+    /**
+     * @notice Allows a user to withdraw a specified amount of their deposited collateral.
+     * @dev Checks if the user has enough collateral deposited before allowing the withdrawal.
+     * Updates the user's and contract's collateral records and transfers the tokens back to the user.
+     *
+     * @param token The address of the token to withdraw.
+     * @param amount The amount of the token the user wants to withdraw.
+     */
 
     function withdrawCollateral(
         address token,
@@ -1003,5 +1004,42 @@ contract LendingPoolContract is ReentrancyGuard {
         return
             (usdValue * PRECISION) /
             (uint256(price) * ADDITIONAL_PRICEFEED_PRECISION);
+    }
+
+    /**
+     * @notice Returns the amount of collateral a user has deposited for a specific token.
+     * @param token The address of the token.
+     * @return The amount of collateral deposited by the caller for the given token.
+     */
+
+    function getCollateralDetailsOfUser(
+        address token
+    ) external view returns (uint256) {
+        return s_collateralDetails[msg.sender][token];
+    }
+
+    /**
+     * @notice Returns the total amount of a specific token deposited as collateral by all users.
+     * @param token The address of the token.
+     * @return The total amount of that token used as collateral across the platform.
+     */
+
+    function getCollateralPerToken(
+        address token
+    ) external view returns (uint256) {
+        return s_tokenCollateral[token];
+    }
+
+    function getTotalBorroweedForAToken(
+        address token
+    ) external view returns (uint256) {
+        return s_amountBorrowedInToken[token];
+    }
+
+    function getLoanDetails(
+        address user,
+        address token
+    ) public view returns (LoanDetails memory) {
+        return s_loanDetails[user][token];
     }
 }
