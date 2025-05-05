@@ -2,17 +2,21 @@
 pragma solidity ^0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {StableCoin} from "../src/StableCoin.sol";
-import {LpToken} from "../src/LpTokenContract.sol";
+import {LpToken} from "../src/tokens/LpTokenContract.sol";
+import {StableCoin} from "../src/tokens/StableCoin.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ILpToken} from "./interfaces/ILpToken.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AggregatorV3Interface} from "../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
+import {IInterestRateModel} from "../src/interfaces/IInterestRateModel.sol";
+import {ILendingPoolContract} from "../src/interfaces/ILendingPoolContract.sol";
+import {LendingPoolContractErrors} from "./errors/Errors.sol";
 
 // Layout of Contract:
 // version
 // imports
-// interfaces, libraries, contracts
+// interfaces, libraries, 6contracts
 // errors
 // Type declarations
 // State variables
@@ -42,42 +46,23 @@ import {AggregatorV3Interface} from "../lib/chainlink-brownie-contracts/contract
 
     gethealthfactor
 */
-contract LendingPoolContract is ReentrancyGuard {
+contract LendingPoolContract is
+    ReentrancyGuard,
+    AutomationCompatibleInterface,
+    ILendingPoolContract
+{
     ////////////////////
     // Using directives
     ////////////////////
     using SafeERC20 for IERC20;
-    ////////////////////
-    // Errors
-    ////////////////////
-    error LendingPoolContract__TokenAddressAndPriceFeedAddressMismatch(
-        uint256 tokenAddressLength,
-        uint256 priceFeedAddressLength
-    );
-    error LendingPoolContract__NotEnoughLpTokensToBurn(
-        uint256 amountofLpTokensProvided
-    );
-    error LendingPoolContract__InsufficentBalance(
-        uint256 amount,
-        uint256 availableAmount
-    );
-    error LendingPoolContract__NotEnoughCollateral();
-    error LendingPoolContract__LoanPending();
-    error LendingPoolContract__TokenIsNotAllowedToDeposit(address token);
-    error LendingPoolContract__AmountShouldBeGreaterThanZero();
-    error LendingPoolContract__LpTokenMintFailed();
-    error LendingPoolContract__InsufficentLpTokenBalance(
-        uint256 availableBalance
-    );
-    error LendingPoolContract__LoanStillPending();
-    error LendingPoolContract__LoanAmountExceeded();
-    error LendingPoolContract__InvalidRequestAmount();
+
     ////////////////////
     // State Variable
     ////////////////////
     //private variables
 
     /// @dev Struct representing an active loan taken by a user
+
     struct LoanDetails {
         address token; // ───────────────────────────────╮ ERC20 token address borrowed by the user
         uint256 amountBorrowedInUSDT; //                 │ Amount borrowed, denominated in USDT (smallest unit: 6 decimals)
@@ -86,7 +71,8 @@ contract LendingPoolContract is ReentrancyGuard {
         uint256 lastUpdate; //                           │ Timestamp of the last update to the loan state
         address asset; //                                | Address of the token in which user take the loan
         uint256 userBorrowIndex; //                      | The borrowerIndex of the contract when the user made any last update on the loan
-        uint256 interestPaid; //                          | The total interest paid by the user over time
+        uint256 interestPaid; //                         | The total interest paid by the user over time
+        uint256 liquidationPoint; //                     | The liquidation point for the loan, calculated as LTV * collateral amount
         uint256 dueDate; // ─────────────────────────────╯ Timestamp when the loan repayment is due
         uint8 penalty; // ───────────────────────────────╮ Penalty percentage applied after due date (e.g., 5 = 5%)
         bool isLiquidated; // ───────────────────────────╯ True if the loan has been liquidated due to default
@@ -97,58 +83,81 @@ contract LendingPoolContract is ReentrancyGuard {
     /// Each time interest is accrued, this index is updated to reflect the cumulative interest growth.
     /// The individual borrower's interest can be calculated using the difference between the current index
     /// and the index at the time of borrowing.
+
     mapping(address token => uint256 borrowerIndexOfToken)
         public s_borrowerIndex;
+
     /// @notice Records the last timestamp when interest was accrued for each token.
     /// @dev This is used to determine how much time has passed since the last interest update for a specific token,
     /// which is essential for calculating how much new interest should be added to the borrower's debt.
     /// Interest accrual operations refer to this timestamp to keep interest calculations accurate and consistent.
+
     mapping(address token => uint256) public s_lastAccuralTime;
 
     /// @dev mapping the token addresses to the pricefeed addresses
+
     mapping(address collateralTokenAddress => address priceFeedAddress)
         private s_priceFeed;
 
     /// @dev Mapping to track deposited token amounts per user
     /// @custom:structure mapping(user => mapping(token => amount))
+
     mapping(address => mapping(address => uint256))
         private s_depositDetailsOfUser;
 
     /// @dev Tracks loan details for each user per token
     /// @custom:structure mapping(user => mapping(tokenAddress => LoanDetails))
+
     mapping(address user => mapping(address tokenAddress => LoanDetails loanDetails))
         private s_loanDetails;
 
     /// @dev Stores the LP token balance of each user
     /// @custom:structure mapping(user => lpTokenAmount)
+
     mapping(address user => uint256 lpTokenAmount) private s_tokenDetailsofUser;
+
     /// @dev address of the lptoken contract
+
     address private lpToken;
+
     /// @dev the total liquidity locked in the protocol at the moment for a particular token
+
     mapping(address token => uint256 totaliquidityOfToken) private s_liquidity;
 
     /// @dev Tracks the total collateral deposited for each token
     /// @custom:structure mapping(token => totalCollateralAmount)
+
     mapping(address token => uint256 totalCollateralOfToken)
         private s_tokenCollateral;
 
     /// @dev Stores the collateral amount for each user per token
     /// @custom:structure mapping(user => mapping(token => collateralAmount))
+
     mapping(address user => mapping(address token => uint256 amount))
         private s_collateralDetails;
 
     /// @dev Stores the locked collateral amount for each user per token
     /// @custom:structure mapping(user => mapping(token => lockedCollateralAmount))
+
     mapping(address user => mapping(address token => uint256 amount))
         private s_lockedCollateralDetails;
 
     /// @dev checking whether the user has any active loans
-    mapping(address => bool) private s_isBorrower;
-    /// @dev the array of borrowers
+
+    mapping(address user => mapping(address token => bool))
+        private s_isBorrower;
+
+    /// @notice Tracks the total amount borrowed for each token across all users.
+    /// @dev Maps a token address to the cumulative borrowed amount in that token.
 
     mapping(address token => uint256 amountBorrowed)
         private s_amountBorrowedInToken;
+    /// @notice Stores the list of tokens for which a user has active loans.
+    /// @dev Maps a user address to an array of token addresses they have borrowed against.
 
+    mapping(address user => address[] tokens) private s_loanTokensForTheUser;
+
+    /// @dev the array of borrowers
     address[] private borrowers;
 
     ///////////////////////
@@ -156,6 +165,7 @@ contract LendingPoolContract is ReentrancyGuard {
     ///////////////////////
 
     /// @dev address of the stable coin which the protocol supports
+
     address private immutable i_stableCoinAddress;
 
     ///////////////////
@@ -164,38 +174,42 @@ contract LendingPoolContract is ReentrancyGuard {
 
     /// @dev Precision factor used in price feed calculations
     /// @notice This constant defines the additional precision (1e10) to scale price data for accurate calculations
+
     uint256 private constant ADDITIONAL_PRICEFEED_PRECISION = 1e10;
 
     /// @dev The precision factor used for calculations involving token amounts or decimals
     /// @notice This constant defines the precision (1e18) for scaling values to match token precision or to avoid precision loss
+
     uint256 private constant PRECISION = 1e18;
 
     /// @dev The Loan-to-Value (LTV) ratio used in the system
     /// @notice This constant defines the LTV ratio as 75%, represented with 18 decimal places (75e16)
+
     uint256 private constant LTV = 75e16;
+
+    /// @notice Penalty threshold for triggering liquidation.
+    /// @dev Represents 80% (0.8 * 1e18 precision) threshold; if collateral value falls below this, the loan can be liquidated.
+
+    uint256 private constant LIQUIDATION_PENALTY = 80e16;
 
     //////////////////////////
     // public state variables
     //////////////////////////
 
     /// @notice the approved list of tokens the contract accept to trade
+
     address[] public s_tokenAddressesList;
 
     /// @notice the total amount of loan given by the protcol in USD
+
     uint256 public totalBorrowed;
 
-    /// @notice The minimum interest rate applied when utilization is low (5% annualized).
-    uint256 public baseInterestRate = 5e16;
-
-    /// @notice The maximum interest rate applied after utilization exceeds the kink (50% annualized).
-    uint256 public maxInterestRate = 50e15;
-
-    /// @notice The utilization point (70%) at which the interest rate model shifts from linear to higher slope.
-    uint256 public kink = 0.7e18;
+    address public interestRateModelAddress;
 
     ////////////////////
     // Events
     ////////////////////
+
     /// @notice Emitted when a borrower repays their loan.
     /// @param user The address of the borrower.
     /// @param token The address of the token used for the loan.
@@ -210,6 +224,7 @@ contract LendingPoolContract is ReentrancyGuard {
         uint256 interestPaid,
         uint256 principalRepaid
     );
+
     /// @notice Emitted when collateral is released back to the user after loan repayment or liquidation.
     /// @param user The address of the user receiving the collateral.
     /// @param token The token address of the released collateral.
@@ -220,6 +235,11 @@ contract LendingPoolContract is ReentrancyGuard {
         address indexed token,
         uint256 amount
     );
+
+    /// @notice Emitted when a user withdraws their collateral.
+    /// @param user The address of the user who withdrew collateral.
+    /// @param token The address of the token being withdrawn.
+    /// @param amount The amount of collateral withdrawn.
 
     event CollateralWithdrawed(
         address indexed user,
@@ -246,6 +266,7 @@ contract LendingPoolContract is ReentrancyGuard {
     /// @param user The address of the user who withdrew the deposit
     /// @param tokenAddress The address of the token being withdrawn
     /// @param amount The amount of the token withdrawn
+
     event DepositWithdrawn(
         address indexed user,
         address indexed tokenAddress,
@@ -255,15 +276,18 @@ contract LendingPoolContract is ReentrancyGuard {
     /// @dev Emitted when a user deposits collateral
     /// @param user The address of the user who deposited the collateral
     /// @param tokenAddress The address of the token used as collateral
+
     event CollateralDeposited(
         address indexed user,
         address indexed tokenAddress,
         uint256 amountOfCollaterlDeposited
     );
+
     /// @dev Emitted when a user borrows a loan
     /// @param user The address of the user who borrowed the loan
     /// @param token The address of the token associated with the loan
     /// loanDetails The detailed information of the loan (e.g., amount, collateral, etc.)
+
     event LoanBorrowed(
         address indexed user,
         address indexed token,
@@ -271,7 +295,26 @@ contract LendingPoolContract is ReentrancyGuard {
         uint256 amount
     );
 
+    /// @dev Emitted when a user burns LP tokens
+    /// @param user The address of the user who burned the lp tokens
+    /// @param amount The amount of LP tokens the user burned
+
     event LpTokensBurned(address indexed user, uint256 amount);
+
+    /// @notice Emitted when a user's loan is liquidated due to insufficient collateral.
+    /// @param user The address of the user whose loan was liquidated.
+    /// @param token The address of the token associated with the loan.
+    /// @param loanAmount The total outstanding loan amount at the time of liquidation.
+    /// @param collateralValue The USD value of the user's collateral.
+    /// @param liquidationPenalty The penalty amount applied during liquidation.
+
+    event LoanLiquidated(
+        address indexed user,
+        address indexed token,
+        uint256 loanAmount,
+        uint256 collateralValue,
+        uint256 liquidationPenalty
+    );
 
     ////////////////////
     // Modififer
@@ -279,17 +322,21 @@ contract LendingPoolContract is ReentrancyGuard {
 
     /// @dev this prevent the user from passing zero value to the contract
     ///
+
     modifier isGreaterThanZero(uint256 amount) {
         if (amount == 0) {
-            revert LendingPoolContract__AmountShouldBeGreaterThanZero();
+            revert LendingPoolContractErrors
+                .LendingPoolContract__AmountShouldBeGreaterThanZero();
         }
         _;
     }
 
     /// @dev this prevent the user from depositing money from chains that is not supported on this contract
+
     modifier isTokenApprovedByTheContract(address token) {
         if (s_priceFeed[token] == address(0)) {
-            revert LendingPoolContract__TokenIsNotAllowedToDeposit(token);
+            revert LendingPoolContractErrors
+                .LendingPoolContract__TokenIsNotAllowedToDeposit(token);
         }
         _;
     }
@@ -308,13 +355,15 @@ contract LendingPoolContract is ReentrancyGuard {
         address[] memory tokenAddresses,
         address[] memory priceFeedAddresses,
         address stableCoinAddress,
-        address lpTokenAddress
+        address lpTokenAddress,
+        address interestRateModelAddress_
     ) {
         if (tokenAddresses.length != priceFeedAddresses.length) {
-            revert LendingPoolContract__TokenAddressAndPriceFeedAddressMismatch(
-                tokenAddresses.length,
-                priceFeedAddresses.length
-            );
+            revert LendingPoolContractErrors
+                .LendingPoolContract__TokenAddressAndPriceFeedAddressMismatch(
+                    tokenAddresses.length,
+                    priceFeedAddresses.length
+                );
         }
         for (uint256 i = 0; i < tokenAddresses.length; i++) {
             s_borrowerIndex[tokenAddresses[i]] = 1e18;
@@ -322,6 +371,7 @@ contract LendingPoolContract is ReentrancyGuard {
             s_priceFeed[tokenAddresses[i]] = priceFeedAddresses[i];
             s_tokenAddressesList.push(tokenAddresses[i]);
         }
+        interestRateModelAddress = interestRateModelAddress_;
         i_stableCoinAddress = stableCoinAddress;
         lpToken = lpTokenAddress;
     }
@@ -467,10 +517,8 @@ contract LendingPoolContract is ReentrancyGuard {
     {
         uint256 depositAmount = s_depositDetailsOfUser[msg.sender][token];
         if (depositAmount < amount) {
-            revert LendingPoolContract__InsufficentBalance(
-                amount,
-                depositAmount
-            );
+            revert LendingPoolContractErrors
+                .LendingPoolContract__InsufficentBalance(amount, depositAmount);
         }
         s_depositDetailsOfUser[msg.sender][token] -= amount;
         s_liquidity[token] -= amount;
@@ -496,7 +544,8 @@ contract LendingPoolContract is ReentrancyGuard {
     function burn(uint256 amount) external isGreaterThanZero(amount) {
         uint256 balance = ILpToken(lpToken).balanceOf(msg.sender);
         if (balance < amount) {
-            revert LendingPoolContract__InsufficentLpTokenBalance(balance);
+            revert LendingPoolContractErrors
+                .LendingPoolContract__InsufficentLpTokenBalance(balance);
         }
         _burnLpTokens(msg.sender, amount);
         emit LpTokensBurned(msg.sender, amount);
@@ -542,7 +591,7 @@ contract LendingPoolContract is ReentrancyGuard {
         uint256 amount
     ) external isGreaterThanZero(amount) isTokenApprovedByTheContract(token) {
         if (s_loanDetails[msg.sender][token].amountBorrowedInUSDT > 0) {
-            revert LendingPoolContract__LoanPending();
+            revert LendingPoolContractErrors.LendingPoolContract__LoanPending();
         }
         uint256 depositedCollateral = s_collateralDetails[msg.sender][token];
 
@@ -554,11 +603,13 @@ contract LendingPoolContract is ReentrancyGuard {
             collateralAvailableForLending
         );
         if (amount > collateralAvailableForLendingInUsd) {
-            revert LendingPoolContract__NotEnoughCollateral();
+            revert LendingPoolContractErrors
+                .LendingPoolContract__NotEnoughCollateral();
         }
-        if (!s_isBorrower[msg.sender]) {
+        if (!s_isBorrower[msg.sender][token]) {
             borrowers.push(msg.sender);
-            s_isBorrower[msg.sender] = true;
+            s_loanTokensForTheUser[msg.sender].push(token);
+            s_isBorrower[msg.sender][token] = true;
         }
         _accuredInterest(token); //this accuredInterest will update the global value for the borrowerIndex for the particular token everytime a user takes loan from the contract
         totalBorrowed += amount;
@@ -653,7 +704,8 @@ contract LendingPoolContract is ReentrancyGuard {
         uint256 interestPaidNow = 0;
         uint256 principalRepaid = 0;
         if (amount > scaledLoanAmount) {
-            revert LendingPoolContract__LoanAmountExceeded();
+            revert LendingPoolContractErrors
+                .LendingPoolContract__LoanAmountExceeded();
         }
 
         IERC20(token).transferFrom(msg.sender, address(this), amount);
@@ -710,13 +762,140 @@ contract LendingPoolContract is ReentrancyGuard {
         nonReentrant
     {
         if (s_collateralDetails[msg.sender][token] < amount) {
-            revert LendingPoolContract__InvalidRequestAmount();
+            revert LendingPoolContractErrors
+                .LendingPoolContract__InvalidRequestAmount();
         }
         s_collateralDetails[msg.sender][token] -= amount;
         s_tokenCollateral[token] -= amount;
         IERC20(token).safeTransfer(msg.sender, amount);
         emit CollateralWithdrawed(msg.sender, token, amount);
     }
+
+    // liquidate function
+    /**
+     * @notice This function allows the liquidation of a borrower's loan if the value of their collateral falls below the required threshold.
+     *
+     * @dev
+     * - A loan is considered liquidatable if the value of the collateral is lower than the required liquidation value.
+     * - In such cases, the collateral is transferred from the borrower’s account to the liquidity pool, and the loan is removed from the system.
+     * - This function also ensures that only approved tokens can be used for liquidation and that it cannot be re-entered during execution (non-reentrancy check).
+     *
+     * The liquidation process involves:
+     * 1. Verifying that the loan is still active by checking if the borrower owes an outstanding amount.
+     * 2. Determining the current value of the collateral in USD using the token’s price feed.
+     * 3. Comparing the value of the collateral against the liquidation threshold, which is calculated as the loan amount plus a liquidation penalty.
+     * 4. If the collateral value is below the liquidation threshold, the collateral is moved back to the liquidity pool and the loan is cleared from the system.
+     * 5. If the collateral is above the liquidation threshold, the liquidation is rejected, and the loan remains active.
+     *
+     * @param user The address of the borrower whose loan is being liquidated.
+     * @param token The address of the token used for the loan (the token collateralized by the borrower).
+     *
+     *
+     *
+     * @dev
+     * This function will emit the `LoanLiquidated` event when the liquidation is successful.
+     * The event contains details about the loan that was liquidated, including the amount borrowed, the value of collateral, and the liquidation threshold.
+     *
+     * @dev
+     * Requirements:
+     * - The `token` must be approved by the contract for liquidation.
+     * - The loan must exist and be active.
+     * - The collateral value must fall below the required liquidation value for the liquidation to proceed.
+     *
+     * @custom:revert LendingPoolContract__LoanIsNotActive The loan does not exist or has been fully repaid, so it cannot be liquidated.
+     * @custom:revert LendingPoolContract__NotLiquidatable The collateral value is greater than the liquidation threshold, so liquidation is not possible.
+     *
+     * event LoanLiquidated
+     * - Emitted when a loan is successfully liquidated.
+     * - Contains details of the loan amount, collateral value, and liquidation value.
+     */
+
+    function liquidate(
+        address user,
+        address token
+    ) internal isTokenApprovedByTheContract(token) nonReentrant {
+        LoanDetails storage loan = s_loanDetails[user][token];
+        uint256 loanAmount = loan.amountBorrowedInUSDT;
+        if (loanAmount == 0) {
+            revert LendingPoolContractErrors
+                .LendingPoolContract__LoanIsNotActive();
+        }
+        uint256 collateralValueInUSD = getUsdValue(token, loan.collateralUsed);
+        uint256 liquidationValue = (loanAmount * LIQUIDATION_PENALTY) /
+            PRECISION;
+        if (collateralValueInUSD > liquidationValue) {
+            revert LendingPoolContractErrors
+                .LendingPoolContract__NotLiquidatable();
+        }
+        s_amountBorrowedInToken[token] -= loan.collateralUsed;
+        s_liquidity[token] += loan.collateralUsed;
+        totalBorrowed -= loanAmount;
+        delete s_isBorrower[user][token];
+        delete s_loanDetails[user][token];
+        delete s_lockedCollateralDetails[user][token];
+        emit LoanLiquidated(
+            user,
+            token,
+            loanAmount,
+            collateralValueInUSD,
+            liquidationValue
+        );
+    }
+
+    /**
+     * @notice Checks if any borrower's loan has passed its due date and requires liquidation.
+     * @dev This function is used by Chainlink Keepers (or any automated service) to determine if maintenance work is needed.
+     * It loops through all borrowers and their loan tokens to find any overdue loans.
+     * If an overdue loan is found, it returns `true` with encoded borrower and token information.
+     * If no overdue loans are found, it returns `false` and empty performData.
+     *
+     * checkData Not used in this function. Included to match the KeeperCompatibleInterface.
+     * @return upkeepNeeded A boolean value indicating whether upkeep (liquidation) is needed.
+     * @return performData Encoded data containing the borrower address and token address to be used in performUpkeep.
+     */
+
+    function checkUpkeep(
+        bytes calldata /* checkData */
+    )
+        external
+        view
+        override
+        returns (bool upkeepNeeded, bytes memory performData)
+    {
+        for (uint256 i = 0; i < borrowers.length; i++) {
+            address borrower = borrowers[i];
+            address[] memory tokens = s_loanTokensForTheUser[borrower];
+            for (uint256 j = 0; j < tokens.length; j++) {
+                LoanDetails storage loan = s_loanDetails[msg.sender][tokens[j]];
+                if (block.timestamp > loan.dueDate) {
+                    return (true, abi.encode(borrower, tokens[j]));
+                }
+            }
+        }
+        return (false, "");
+    }
+
+    /**
+     * @notice Performs the upkeep by liquidating overdue loans.
+     * @dev This function is triggered by Chainlink Keepers (or other automated services)
+     * when `checkUpkeep` signals that upkeep is needed. It decodes the borrower and token from
+     * the `performData`, checks if the loan is overdue, and if so, calls the `liquidate` function.
+     *
+     * @param performData Encoded data containing the borrower's address and the token address,
+     * produced by `checkUpkeep`.
+     */
+    function performUpkeep(bytes calldata performData) external override {
+        (address borrower, address token) = abi.decode(
+            performData,
+            (address, address)
+        );
+        LoanDetails storage loan = s_loanDetails[borrower][token];
+        if (block.timestamp > loan.dueDate) {
+            liquidate(borrower, token);
+        }
+    }
+
+    // function
 
     ////////////////////
     // Internal
@@ -733,68 +912,12 @@ contract LendingPoolContract is ReentrancyGuard {
     function _releaseCollateral(address user, address token) internal {
         LoanDetails storage loan = s_loanDetails[user][token];
         if (loan.amountBorrowedInUSDT != 0) {
-            revert LendingPoolContract__LoanStillPending();
+            revert LendingPoolContractErrors
+                .LendingPoolContract__LoanStillPending();
         }
         s_amountBorrowedInToken[token] -= loan.collateralUsed;
         s_lockedCollateralDetails[user][token] -= loan.collateralUsed;
         s_collateralDetails[user][token] += loan.collateralUsed;
-    }
-
-    /**
-     * @notice Calculates the utilization ratio of a given asset class.
-     * @dev The utilization ratio is determined by dividing the total amount borrowed by the liquidity available for that asset class.
-     * @param assetClass The address of the asset class (e.g., a specific token or collateral type).
-     * @return utilizationRatio The calculated utilization ratio (scaled by PRECISION).
-     */
-
-    function calculateUtilizationRatio(
-        address assetClass
-    ) internal view returns (uint256 utilizationRatio) {
-        if (s_liquidity[assetClass] == 0) {
-            return 0;
-        }
-        utilizationRatio =
-            (s_amountBorrowedInToken[assetClass] * PRECISION) /
-            s_liquidity[assetClass];
-    }
-
-    // calculating the interest rate
-    /**
-     * @notice Calculates the interest rate for a given token based on its utilization ratio.
-     * @dev The interest rate is dynamically adjusted based on the utilization ratio of the token.
-     * If the utilization ratio is below a defined threshold (`kink`), the interest rate increases gradually from a base rate to a maximum rate.
-     * If the utilization ratio exceeds the `kink`, the interest rate increases more steeply towards the maximum interest rate.
-     *
-     * This function uses two main parameters:
-     * - `baseInterestRate`: The starting interest rate when utilization is low.
-     * - `maxInterestRate`: The maximum interest rate that can be reached when utilization exceeds the kink.
-     *
-     * The function calculates the `utilizationRatio` first, and then uses it to determine the appropriate interest rate based on the following logic:
-     * 1. If the utilization ratio is below `kink`, the rate is a linear function of the utilization ratio.
-     * 2. If the utilization ratio exceeds `kink`, the rate increases sharply as the utilization ratio rises.
-     *
-     * @param token The address of the token for which the interest rate is being calculated.
-     * @return interestRate The calculated interest rate, scaled by the precision factor.
-     */
-
-    function calculateInterestRate(
-        address token
-    ) public view returns (uint256) {
-        uint256 utilizationRatio = calculateUtilizationRatio(token);
-        uint256 interestRate;
-        if (utilizationRatio < kink) {
-            interestRate =
-                baseInterestRate +
-                ((maxInterestRate - baseInterestRate) * utilizationRatio) /
-                kink;
-        } else {
-            interestRate =
-                maxInterestRate +
-                ((maxInterestRate * (utilizationRatio - kink)) /
-                    (PRECISION - kink));
-        }
-
-        return interestRate;
     }
 
     /**
@@ -805,7 +928,7 @@ contract LendingPoolContract is ReentrancyGuard {
      *
      * The function performs the following steps:
      * 1. Calculates the time elapsed since the last accrual.
-     * 2. Retrieves the current annual interest rate for the token using the `calculateInterestRate` function.
+     * 2. Retrieves the current annual interest rate for the token using the `_calculateInterestRate` function.
      * 3. Converts the annual interest rate into a per-second rate.
      * 4. Calculates the interest factor based on the time elapsed and the per-second rate.
      * 5. Updates the borrower index (`s_borrowerIndex[token]`) to reflect the accumulated interest.
@@ -816,10 +939,12 @@ contract LendingPoolContract is ReentrancyGuard {
      * @param token The address of the token for which interest needs to be accrued.
      */
 
-    function _accuredInterest(address token) public {
+    function _accuredInterest(address token) private {
         uint256 timeElapsed = block.timestamp - s_lastAccuralTime[token];
         if (timeElapsed == 0) return;
-        uint256 annualInterestRate = calculateInterestRate(token);
+        uint256 annualInterestRate = IInterestRateModel(
+            interestRateModelAddress
+        ).getUtilizationRatio(token);
         uint256 ratePerSecond = annualInterestRate / 365 days;
         uint256 interestFactor = ratePerSecond * timeElapsed;
         s_borrowerIndex[token] +=
@@ -850,7 +975,8 @@ contract LendingPoolContract is ReentrancyGuard {
         uint256 amountToMint
     ) internal isGreaterThanZero(amountToMint) {
         if (!ILpToken(lpToken).mint(to, amountToMint)) {
-            revert LendingPoolContract__LpTokenMintFailed();
+            revert LendingPoolContractErrors
+                .LendingPoolContract__LpTokenMintFailed();
         }
         s_tokenDetailsofUser[to] += amountToMint;
     }
@@ -1030,16 +1156,37 @@ contract LendingPoolContract is ReentrancyGuard {
         return s_tokenCollateral[token];
     }
 
+    /**
+     * @notice Returns the total amount borrowed for a specific token.
+     * @param token The address of the token.
+     * @return The total amount borrowed for the specified token.
+     */
+
     function getTotalBorroweedForAToken(
         address token
     ) external view returns (uint256) {
         return s_amountBorrowedInToken[token];
     }
 
+    /**
+     * @notice Retrieves the loan details of a specific user for a given token.
+     * @param user The address of the user.
+     * @param token The address of the token used for the loan.
+     * @return The loan details (amount borrowed, collateral used, etc.) of the user for the specified token.
+     */
+
     function getLoanDetails(
         address user,
         address token
     ) public view returns (LoanDetails memory) {
         return s_loanDetails[user][token];
+    }
+
+    function getPriceFeedAddress(address token) public view returns (address) {
+        return s_priceFeed[token];
+    }
+
+    function getInterestRateModelAddress() public view returns (address) {
+        return interestRateModelAddress;
     }
 }

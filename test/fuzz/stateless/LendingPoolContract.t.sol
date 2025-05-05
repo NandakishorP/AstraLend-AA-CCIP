@@ -4,10 +4,10 @@ pragma solidity ^0.8.24;
 import {Test, console} from "forge-std/Test.sol";
 import {DeployLendingPoolContract} from "../../../script/DeployLendingPoolContract.s.sol";
 import {LendingPoolContract} from "../../../src/LendingPoolContract.sol";
-import {StableCoin} from "../../../src/StableCoin.sol";
+import {StableCoin} from "../../../src/tokens/StableCoin.sol";
 import {HelperConfig} from "../../../script/HelperConfig.s.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
-import {LpToken} from "../../../src/LpTokenContract.sol";
+import {LpToken} from "../../../src/tokens/LpTokenContract.sol";
 
 contract LendingPoolContractTest is Test {
     LendingPoolContract public lendingPoolContract;
@@ -27,6 +27,7 @@ contract LendingPoolContractTest is Test {
     uint256 public deployer;
 
     function setUp() public {
+        console.log(address(this));
         DeployLendingPoolContract deployLendingPoolContract = new DeployLendingPoolContract();
         (
             lendingPoolContract,

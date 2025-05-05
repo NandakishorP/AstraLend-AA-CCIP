@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {LpTokenErrors} from "../errors/Errors.sol";
 
 /**
  * @title LpToken
@@ -15,12 +16,6 @@ contract LpToken is ERC20Burnable, Ownable {
     ////////////////////
     // Error
     ////////////////////
-    error LpToken__AmountMustBeMoreThanZero();
-    error LpToken__NotEnoughTokensToBurn(
-        uint256 userBalance,
-        uint256 amountProvided
-    );
-    error LpToken__InvalidAddress();
 
     /**
      * @notice Constructor to initialize the LpToken contract.
@@ -44,10 +39,13 @@ contract LpToken is ERC20Burnable, Ownable {
     function burn(address user, uint256 _amount) public onlyOwner {
         uint256 balance = balanceOf(msg.sender);
         if (_amount <= 0) {
-            revert LpToken__AmountMustBeMoreThanZero();
+            revert LpTokenErrors.LpToken__AmountMustBeMoreThanZero();
         }
         if (balance < _amount) {
-            revert LpToken__NotEnoughTokensToBurn(balance, _amount);
+            revert LpTokenErrors.LpToken__NotEnoughTokensToBurn(
+                balance,
+                _amount
+            );
         }
         _burn(user, _amount);
     }
@@ -69,10 +67,10 @@ contract LpToken is ERC20Burnable, Ownable {
         uint256 _amount
     ) external onlyOwner returns (bool) {
         if (_to == address(0)) {
-            revert LpToken__InvalidAddress();
+            revert LpTokenErrors.LpToken__InvalidAddress();
         }
         if (_amount <= 0) {
-            revert LpToken__AmountMustBeMoreThanZero();
+            revert LpTokenErrors.LpToken__AmountMustBeMoreThanZero();
         }
         _mint(_to, _amount);
         return true;

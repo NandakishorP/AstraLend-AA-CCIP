@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test, console} from "forge-std/Test.sol";
-import {LpToken} from "../../src/LpTokenContract.sol";
+import {LpToken} from "../../src/tokens/LpTokenContract.sol";
 import {ILpToken} from "../../src/interfaces/ILpToken.sol";
 
 contract LpTokenTest is Test {

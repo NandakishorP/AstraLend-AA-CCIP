@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {StableCoinErrors} from "../errors/Errors.sol";
 
 /**
  * @title StableCoin
@@ -14,12 +15,6 @@ contract StableCoin is ERC20, Ownable {
     ////////////////////
     // Error
     ////////////////////
-    error StableCoin__AmountMustBeMoreThanZero();
-    error StableCoin__NotEnoughTokensToBurn(
-        uint256 userBalance,
-        uint256 amountProvided
-    );
-    error StableCoin__InvalidAddress();
 
     /**
      * @notice Constructor to initialize the StableCoin contract.
@@ -44,10 +39,10 @@ contract StableCoin is ERC20, Ownable {
         uint256 _amount
     ) external onlyOwner returns (bool) {
         if (_to == address(0)) {
-            revert StableCoin__InvalidAddress();
+            revert StableCoinErrors.StableCoin__InvalidAddress();
         }
         if (_amount <= 0) {
-            revert StableCoin__AmountMustBeMoreThanZero();
+            revert StableCoinErrors.StableCoin__AmountMustBeMoreThanZero();
         }
         _mint(_to, _amount);
         return true;
