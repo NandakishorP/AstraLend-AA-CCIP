@@ -41,9 +41,9 @@ contract InterestRateModel is IInterestRateModel, Ownable {
 
     uint256 public baseInterestRate = 5e16;
 
-    /// @notice The maximum interest rate applied after utilization exceeds the kink (50% annualized).
+    /// @notice The maximum interest rate applied after utilization exceeds the kink (10% annualized).
 
-    uint256 public maxInterestRate = 50e16;
+    uint256 public maxInterestRate = 100e16;
 
     /// @notice The utilization point (70%) at which the interest rate model shifts from linear to higher slope.
 
@@ -97,7 +97,7 @@ contract InterestRateModel is IInterestRateModel, Ownable {
 
         utilizationRatio =
             (amountBorrowedPerAssetClass * PRECISION) /
-            liquidityPerAssetClass;
+            (liquidityPerAssetClass + amountBorrowedPerAssetClass);
     }
 
     // calculating the interest rate
@@ -127,14 +127,15 @@ contract InterestRateModel is IInterestRateModel, Ownable {
         if (utilizationRatio < kink) {
             interestRate =
                 baseInterestRate +
-                ((maxInterestRate - baseInterestRate) * utilizationRatio) /
-                kink;
+                (((maxInterestRate - baseInterestRate) * utilizationRatio) /
+                    kink);
         } else {
             interestRate =
                 maxInterestRate +
                 ((maxInterestRate * (utilizationRatio - kink)) /
                     (PRECISION - kink));
         }
+        console.log("Interest Rate: %s", interestRate);
 
         return interestRate;
     }

@@ -190,7 +190,9 @@ contract LendingPoolContract is
     /// @notice Penalty threshold for triggering liquidation.
     /// @dev Represents 80% (0.8 * 1e18 precision) threshold; if collateral value falls below this, the loan can be liquidated.
 
-    uint256 private constant LIQUIDATION_PENALTY = 80e16;
+    uint256 private constant LIQUIDATION_THRESHOLD = 80e16;
+
+    uint256 private constant LIQUIDATION_PENALTY = 5e16; // 5% penalty on LIQUIDATION_PENALTY
 
     //////////////////////////
     // public state variables
@@ -621,7 +623,7 @@ contract LendingPoolContract is
         loan.asset = token;
         loan.collateralUsed = getTokenAmountFromUsd(token, amount);
         loan.lastUpdate = block.timestamp;
-        loan.dueDate = block.timestamp + 365 days;
+        loan.dueDate = block.timestamp + 180 days;
         loan.token = i_stableCoinAddress;
         loan.userBorrowIndex = block.timestamp;
         //updating the other params
@@ -890,7 +892,17 @@ contract LendingPoolContract is
             (address, address)
         );
         LoanDetails storage loan = s_loanDetails[borrower][token];
-        if (block.timestamp > loan.dueDate) {
+
+        if (block.timestamp < loan.dueDate) {
+            return;
+        }
+        if (loan.penalty < 3) {
+            loan.penalty++;
+            loan.dueDate = block.timestamp + 30 days;
+            loan.amountBorrowedInUSDT +=
+                (loan.amountBorrowedInUSDT * LIQUIDATION_PENALTY) /
+                PRECISION;
+        } else {
             liquidate(borrower, token);
         }
     }
@@ -944,7 +956,7 @@ contract LendingPoolContract is
         if (timeElapsed == 0) return;
         uint256 annualInterestRate = IInterestRateModel(
             interestRateModelAddress
-        ).getUtilizationRatio(token);
+        ).getInterestRate(token);
         uint256 ratePerSecond = annualInterestRate / 365 days;
         uint256 interestFactor = ratePerSecond * timeElapsed;
         s_borrowerIndex[token] +=
