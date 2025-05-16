@@ -15,14 +15,14 @@ contract Vault is ReentrancyGuard, Ownable {
 
     constructor(
         address lendingPoolContract_,
-        address staleCoinAddress_
+        address stableCoinAddress_
     ) Ownable(lendingPoolContract_) {
         lendingPoolContract = ILendingPoolContract(lendingPoolContract_);
-        stableCoin = staleCoinAddress_;
+        stableCoin = stableCoinAddress_;
     }
 
-    modifier onlyLendingPool(address sender) {
-        if (sender != address(lendingPoolContract)) {
+    modifier onlyLendingPool() {
+        if (msg.sender != address(lendingPoolContract)) {
             revert VaultErrors.Vault__UnauthorizedAccess();
         }
         _;
@@ -40,7 +40,7 @@ contract Vault is ReentrancyGuard, Ownable {
         address user,
         address token,
         uint256 amount
-    ) external payable nonReentrant onlyLendingPool(msg.sender) {
+    ) external payable nonReentrant onlyLendingPool {
         IERC20(token).safeTransferFrom(user, address(this), amount);
     }
 
@@ -48,21 +48,21 @@ contract Vault is ReentrancyGuard, Ownable {
         address user,
         address token,
         uint256 amount
-    ) external nonReentrant onlyLendingPool(msg.sender) {
+    ) external nonReentrant onlyLendingPool {
         IERC20(token).safeTransfer(user, amount);
     }
 
     function transferLoanAmount(
         address user,
         uint256 amount
-    ) external nonReentrant onlyLendingPool(msg.sender) {
+    ) external nonReentrant onlyLendingPool {
         IERC20(stableCoin).safeTransfer(user, amount);
     }
 
     function claimLoan(
         address user,
         uint256 amount
-    ) external nonReentrant onlyLendingPool(msg.sender) {
+    ) external nonReentrant onlyLendingPool {
         IERC20(stableCoin).transferFrom(user, address(this), amount);
     }
 
@@ -70,7 +70,7 @@ contract Vault is ReentrancyGuard, Ownable {
         address user,
         address token,
         uint256 amount
-    ) external nonReentrant onlyLendingPool(msg.sender) {
+    ) external nonReentrant onlyLendingPool {
         IERC20(token).safeTransfer(user, amount);
     }
 }
