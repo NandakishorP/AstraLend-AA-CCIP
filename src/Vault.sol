@@ -12,6 +12,7 @@ contract Vault is ReentrancyGuard, Ownable {
     ILendingPoolContract private lendingPoolContract;
     using SafeERC20 for IERC20;
     address stableCoin;
+    bool private paused;
 
     constructor(
         address lendingPoolContract_,
@@ -19,6 +20,13 @@ contract Vault is ReentrancyGuard, Ownable {
     ) Ownable(lendingPoolContract_) {
         lendingPoolContract = ILendingPoolContract(lendingPoolContract_);
         stableCoin = stableCoinAddress_;
+    }
+
+    modifier notPaused() {
+        if (paused == true) {
+            revert VaultErrors.Vault__VaultPaused();
+        }
+        _;
     }
 
     modifier onlyLendingPool() {
@@ -32,7 +40,7 @@ contract Vault is ReentrancyGuard, Ownable {
         address user,
         address token,
         uint256 amount
-    ) external payable nonReentrant onlyLendingPool {
+    ) external payable nonReentrant onlyLendingPool notPaused {
         IERC20(token).safeTransferFrom(user, address(this), amount);
     }
 
@@ -40,7 +48,7 @@ contract Vault is ReentrancyGuard, Ownable {
         address user,
         address token,
         uint256 amount
-    ) external payable nonReentrant onlyLendingPool {
+    ) external payable nonReentrant onlyLendingPool notPaused {
         IERC20(token).safeTransferFrom(user, address(this), amount);
     }
 
@@ -48,21 +56,21 @@ contract Vault is ReentrancyGuard, Ownable {
         address user,
         address token,
         uint256 amount
-    ) external nonReentrant onlyLendingPool {
+    ) external nonReentrant onlyLendingPool notPaused {
         IERC20(token).safeTransfer(user, amount);
     }
 
     function transferLoanAmount(
         address user,
         uint256 amount
-    ) external nonReentrant onlyLendingPool {
+    ) external nonReentrant onlyLendingPool notPaused {
         IERC20(stableCoin).safeTransfer(user, amount);
     }
 
     function claimLoan(
         address user,
         uint256 amount
-    ) external nonReentrant onlyLendingPool {
+    ) external nonReentrant onlyLendingPool notPaused {
         IERC20(stableCoin).transferFrom(user, address(this), amount);
     }
 
@@ -70,7 +78,7 @@ contract Vault is ReentrancyGuard, Ownable {
         address user,
         address token,
         uint256 amount
-    ) external nonReentrant onlyLendingPool {
+    ) external nonReentrant onlyLendingPool notPaused {
         IERC20(token).safeTransfer(user, amount);
     }
 }

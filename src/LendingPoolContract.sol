@@ -14,6 +14,7 @@ import {ILendingPoolContract} from "../src/interfaces/ILendingPoolContract.sol";
 import {LendingPoolContractErrors} from "./errors/Errors.sol";
 import {console} from "forge-std/console.sol";
 import {Vault} from "./Vault.sol";
+import {IVault} from "./interfaces/IVault.sol";
 
 // Layout of Contract:
 // version
@@ -210,7 +211,7 @@ contract LendingPoolContract is
 
     address public interestRateModelAddress;
 
-    Vault vault;
+    IVault vault;
 
     ////////////////////
     // Events
@@ -380,7 +381,7 @@ contract LendingPoolContract is
         interestRateModelAddress = interestRateModelAddress_;
         i_stableCoinAddress = stableCoinAddress;
         lpToken = lpTokenAddress;
-        vault = new Vault(address(this), i_stableCoinAddress);
+        vault = IVault(address(new Vault(address(this), i_stableCoinAddress)));
     }
 
     ////////////////////
