@@ -32,7 +32,7 @@ contract Vault is ReentrancyGuard, Ownable {
         address user,
         address token,
         uint256 amount
-    ) external payable nonReentrant onlyLendingPool(msg.sender) {
+    ) external payable nonReentrant onlyLendingPool {
         IERC20(token).safeTransferFrom(user, address(this), amount);
     }
 
