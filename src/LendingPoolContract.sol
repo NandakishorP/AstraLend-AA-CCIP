@@ -77,8 +77,8 @@ contract LendingPoolContract is
         uint256 interestPaid; //                         | The total interest paid by the user over time
         uint256 liquidationPoint; //                     | The liquidation point for the loan, calculated as LTV * collateral amount
         uint256 dueDate; // ─────────────────────────────╯ Timestamp when the loan repayment is due
-        uint8 penalty; // ───────────────────────────────╮ Penalty percentage applied after due date (e.g., 5 = 5%)
-        bool isLiquidated; // ───────────────────────────╯ True if the loan has been liquidated due to default
+        uint8 penaltyCount; // ───────────────────────────────╮ Penalty count  after due date (limit is 2)
+        bool isLiquidated; // ────────────────────────────────╯ True if the loan has been liquidated due to default
     }
 
     /// @notice Tracks the index representing the total interest factor for each token across all borrowers.
@@ -831,13 +831,17 @@ contract LendingPoolContract is
         uint256 collateralValueInUSD = getUsdValue(token, loan.collateralUsed);
         uint256 liquidationValue = (loanAmount * LIQUIDATION_PENALTY) /
             PRECISION;
-        if (collateralValueInUSD > liquidationValue) {
+        if (collateralValueInUSD > liquidationValue && loan.penaltyCount < 2) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__NotLiquidatable();
         }
         s_amountBorrowedInToken[token] -= loan.collateralUsed;
         s_liquidity[token] += loan.collateralUsed;
-        totalBorrowed -= loanAmount;
+        if (loanAmount > totalBorrowed) {
+            totalBorrowed = 0;
+        } else {
+            totalBorrowed -= loanAmount;
+        }
         delete s_isBorrower[user][token];
         delete s_loanDetails[user][token];
         delete s_lockedCollateralDetails[user][token];
@@ -875,7 +879,17 @@ contract LendingPoolContract is
             address[] memory tokens = s_loanTokensForTheUser[borrower];
             for (uint256 j = 0; j < tokens.length; j++) {
                 LoanDetails storage loan = s_loanDetails[msg.sender][tokens[j]];
-                if (block.timestamp > loan.dueDate) {
+
+                uint256 collateralValueInUSD = getUsdValue(
+                    tokens[j],
+                    loan.collateralUsed
+                );
+                uint256 liquidationValue = (loan.amountBorrowedInUSDT *
+                    LIQUIDATION_PENALTY) / PRECISION;
+                if (
+                    block.timestamp > loan.dueDate ||
+                    collateralValueInUSD < liquidationValue
+                ) {
                     return (true, abi.encode(borrower, tokens[j]));
                 }
             }
@@ -902,8 +916,8 @@ contract LendingPoolContract is
         if (block.timestamp < loan.dueDate) {
             return;
         }
-        if (loan.penalty < 3) {
-            loan.penalty++;
+        if (loan.penaltyCount < 2) {
+            loan.penaltyCount++;
             loan.dueDate = block.timestamp + 30 days;
             loan.amountBorrowedInUSDT +=
                 (loan.amountBorrowedInUSDT * LIQUIDATION_PENALTY) /

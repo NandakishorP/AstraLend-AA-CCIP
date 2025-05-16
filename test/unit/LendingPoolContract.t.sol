@@ -626,6 +626,73 @@ contract LendingPoolContractTest is Test {
         assertEq(loanSummary2.amountBorrowedInUSDT, 0);
         vm.stopPrank();
     }
+
     //15000000000000000000000
     //7500000000000000000000
+
+    function testLiquidation() public {
+        vm.prank(address(lendingPoolContract));
+        ERC20Mock(address(stableCoin)).mint(vault, 100000 ether);
+        vm.startPrank(user1);
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
+        lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
+        uint256 collateralAvailableForBorrowing3 = (DEPOSITING_AMOUNT * 75e16) /
+            1e18;
+        uint256 collateralAvailableForBorrowingInUsd3 = lendingPoolContract
+            .getUsdValue(weth, collateralAvailableForBorrowing3);
+        lendingPoolContract.borrowLoan(
+            weth,
+            collateralAvailableForBorrowingInUsd3
+        );
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 181 days);
+
+        (bool upkeepNeeded, bytes memory performData) = lendingPoolContract
+            .checkUpkeep("");
+
+        if (upkeepNeeded) {
+            lendingPoolContract.performUpkeep(performData);
+        }
+
+        LendingPoolContract.LoanDetails
+            memory loanSummery1 = lendingPoolContract.getLoanDetails(
+                user1,
+                weth
+            );
+        assertEq(loanSummery1.penaltyCount, 1);
+
+        vm.warp(block.timestamp + 31 days);
+
+        (bool upkeepNeeded2, bytes memory performData2) = lendingPoolContract
+            .checkUpkeep("");
+
+        if (upkeepNeeded2) {
+            lendingPoolContract.performUpkeep(performData2);
+        }
+
+        LendingPoolContract.LoanDetails
+            memory loanSummery2 = lendingPoolContract.getLoanDetails(
+                user1,
+                weth
+            );
+
+        assertEq(loanSummery2.penaltyCount, 2);
+
+        vm.warp(block.timestamp + 32 days);
+
+        (bool upkeepNeeded3, bytes memory performData3) = lendingPoolContract
+            .checkUpkeep("");
+
+        if (upkeepNeeded3) {
+            lendingPoolContract.performUpkeep(performData3);
+        }
+
+        assertEq(
+            lendingPoolContract
+                .getLoanDetails(user1, weth)
+                .amountBorrowedInUSDT,
+            0
+        );
+    }
 }
