@@ -135,7 +135,6 @@ contract InterestRateModel is IInterestRateModel, Ownable {
                 ((maxInterestRate * (utilizationRatio - kink)) /
                     (PRECISION - kink));
         }
-        console.log("Interest Rate: %s", interestRate);
 
         return interestRate;
     }

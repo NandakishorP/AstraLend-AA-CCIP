@@ -12,6 +12,8 @@ import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/autom
 import {IInterestRateModel} from "../src/interfaces/IInterestRateModel.sol";
 import {ILendingPoolContract} from "../src/interfaces/ILendingPoolContract.sol";
 import {LendingPoolContractErrors} from "./errors/Errors.sol";
+import {console} from "forge-std/console.sol";
+import {Vault} from "./Vault.sol";
 
 // Layout of Contract:
 // version
@@ -208,6 +210,8 @@ contract LendingPoolContract is
 
     address public interestRateModelAddress;
 
+    Vault vault;
+
     ////////////////////
     // Events
     ////////////////////
@@ -376,6 +380,7 @@ contract LendingPoolContract is
         interestRateModelAddress = interestRateModelAddress_;
         i_stableCoinAddress = stableCoinAddress;
         lpToken = lpTokenAddress;
+        vault = new Vault(address(this));
     }
 
     ////////////////////
@@ -424,7 +429,7 @@ contract LendingPoolContract is
         nonReentrant
     {
         //safeTraansfer function is used instead of the normal transfer,it ensures that the user has approved necessery funds for the contract
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        vault.depositLiquidity(msg.sender, token, amount);
         uint256 currentTotalLiquidity = s_liquidity[token];
         uint256 totalSupplyOfLpToken = ILpToken(lpToken).totalSupply();
         uint256 amountOfLpTokensToMint;
@@ -479,7 +484,7 @@ contract LendingPoolContract is
         isTokenApprovedByTheContract(token)
         nonReentrant
     {
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        vault.depositCollateral(msg.sender, token, amount);
         s_collateralDetails[msg.sender][token] += amount;
         s_tokenCollateral[token] += amount;
         emit CollateralDeposited(msg.sender, token, amount);
@@ -524,7 +529,7 @@ contract LendingPoolContract is
         }
         s_depositDetailsOfUser[msg.sender][token] -= amount;
         s_liquidity[token] -= amount;
-        IERC20(token).safeTransfer(msg.sender, amount);
+        vault.withdrawDeposit(msg.sender, token, amount);
         emit DepositWithdrawn(msg.sender, token, amount);
     }
 
@@ -613,7 +618,6 @@ contract LendingPoolContract is
             s_loanTokensForTheUser[msg.sender].push(token);
             s_isBorrower[msg.sender][token] = true;
         }
-        _accuredInterest(token); //this accuredInterest will update the global value for the borrowerIndex for the particular token everytime a user takes loan from the contract
         totalBorrowed += amount;
         s_amountBorrowedInToken[token] += getTokenAmountFromUsd(token, amount);
         LoanDetails storage loan = s_loanDetails[msg.sender][token];
@@ -625,11 +629,11 @@ contract LendingPoolContract is
         loan.lastUpdate = block.timestamp;
         loan.dueDate = block.timestamp + 180 days;
         loan.token = i_stableCoinAddress;
-        loan.userBorrowIndex = block.timestamp;
+        loan.userBorrowIndex = s_borrowerIndex[token];
         //updating the other params
         s_collateralDetails[msg.sender][token] -= depositedCollateral;
         s_lockedCollateralDetails[msg.sender][token] += depositedCollateral;
-
+        _accuredInterest(token); //this accuredInterest will update the global value for the borrowerIndex for the particular token everytime a user takes loan from the contract
         IERC20(i_stableCoinAddress).safeTransfer(msg.sender, amount);
         emit LoanBorrowed(msg.sender, token, loan, amount);
     }
@@ -696,7 +700,6 @@ contract LendingPoolContract is
         isGreaterThanZero(amount)
         nonReentrant
     {
-        _accuredInterest(token);
         LoanDetails storage loan = s_loanDetails[msg.sender][token];
         uint256 principalLoanAmount = loan.amountBorrowedInUSDT;
         uint256 userBorrowIndex = loan.userBorrowIndex;
@@ -710,7 +713,11 @@ contract LendingPoolContract is
                 .LendingPoolContract__LoanAmountExceeded();
         }
 
-        IERC20(token).transferFrom(msg.sender, address(this), amount);
+        IERC20(i_stableCoinAddress).transferFrom(
+            msg.sender,
+            address(this),
+            amount
+        );
         if (amount <= interestAccrued) {
             // Entire repayment goes to pay interest only
             interestPaidNow = amount;
@@ -721,7 +728,7 @@ contract LendingPoolContract is
         } else {
             // Repays full interest and some (or all) principal
             interestPaidNow = interestAccrued;
-            principalRepaid = amount - interestAccrued;
+            principalRepaid = amount - interestPaidNow;
             // Update the new loan amount after principal repayment
             scaledLoanAmount = loan.amountBorrowedInUSDT - principalRepaid;
         }
@@ -729,6 +736,8 @@ contract LendingPoolContract is
         loan.amountBorrowedInUSDT = scaledLoanAmount;
         loan.interestPaid += interestPaidNow;
         totalBorrowed -= principalRepaid;
+        _accuredInterest(token);
+
         if (loan.amountBorrowedInUSDT == 0) {
             _releaseCollateral(msg.sender, token);
             emit CollateralReleased(msg.sender, token, amount);
@@ -1196,6 +1205,10 @@ contract LendingPoolContract is
 
     function getPriceFeedAddress(address token) public view returns (address) {
         return s_priceFeed[token];
+    }
+
+    function getBorrowerIndex(address token) public view returns (uint256) {
+        return s_borrowerIndex[token];
     }
 
     function getInterestRateModelAddress() public view returns (address) {

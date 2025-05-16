@@ -56,3 +56,9 @@ library StableCoinErrors {
     );
     error StableCoin__InvalidAddress();
 }
+
+library VaultErrors {
+    error Vault__AmountShouldBeGreaterThanZero();
+    error Vault__TokenIsNotAllowedToDeposit(address token);
+    error Vault__UnauthorizedAccess();
+}
