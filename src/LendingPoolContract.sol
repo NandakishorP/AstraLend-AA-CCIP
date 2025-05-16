@@ -380,7 +380,7 @@ contract LendingPoolContract is
         interestRateModelAddress = interestRateModelAddress_;
         i_stableCoinAddress = stableCoinAddress;
         lpToken = lpTokenAddress;
-        vault = new Vault(address(this));
+        vault = new Vault(address(this), i_stableCoinAddress);
     }
 
     ////////////////////
@@ -634,7 +634,7 @@ contract LendingPoolContract is
         s_collateralDetails[msg.sender][token] -= depositedCollateral;
         s_lockedCollateralDetails[msg.sender][token] += depositedCollateral;
         _accuredInterest(token); //this accuredInterest will update the global value for the borrowerIndex for the particular token everytime a user takes loan from the contract
-        IERC20(i_stableCoinAddress).safeTransfer(msg.sender, amount);
+        vault.transferLoanAmount(msg.sender, amount);
         emit LoanBorrowed(msg.sender, token, loan, amount);
     }
 
@@ -713,11 +713,7 @@ contract LendingPoolContract is
                 .LendingPoolContract__LoanAmountExceeded();
         }
 
-        IERC20(i_stableCoinAddress).transferFrom(
-            msg.sender,
-            address(this),
-            amount
-        );
+        vault.claimLoan(msg.sender, amount);
         if (amount <= interestAccrued) {
             // Entire repayment goes to pay interest only
             interestPaidNow = amount;
@@ -778,7 +774,7 @@ contract LendingPoolContract is
         }
         s_collateralDetails[msg.sender][token] -= amount;
         s_tokenCollateral[token] -= amount;
-        IERC20(token).safeTransfer(msg.sender, amount);
+        vault.transferCollateral(msg.sender, token, amount);
         emit CollateralWithdrawed(msg.sender, token, amount);
     }
 

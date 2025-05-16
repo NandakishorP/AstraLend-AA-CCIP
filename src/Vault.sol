@@ -11,9 +11,14 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract Vault is ReentrancyGuard, Ownable {
     ILendingPoolContract private lendingPoolContract;
     using SafeERC20 for IERC20;
+    address stableCoin;
 
-    constructor(address _lendingPoolContract) Ownable(_lendingPoolContract) {
-        lendingPoolContract = ILendingPoolContract(_lendingPoolContract);
+    constructor(
+        address lendingPoolContract_,
+        address staleCoinAddress_
+    ) Ownable(lendingPoolContract_) {
+        lendingPoolContract = ILendingPoolContract(lendingPoolContract_);
+        stableCoin = staleCoinAddress_;
     }
 
     modifier onlyLendingPool(address sender) {
@@ -40,6 +45,28 @@ contract Vault is ReentrancyGuard, Ownable {
     }
 
     function withdrawDeposit(
+        address user,
+        address token,
+        uint256 amount
+    ) external nonReentrant onlyLendingPool(msg.sender) {
+        IERC20(token).safeTransfer(user, amount);
+    }
+
+    function transferLoanAmount(
+        address user,
+        uint256 amount
+    ) external nonReentrant onlyLendingPool(msg.sender) {
+        IERC20(stableCoin).safeTransfer(user, amount);
+    }
+
+    function claimLoan(
+        address user,
+        uint256 amount
+    ) external nonReentrant onlyLendingPool(msg.sender) {
+        IERC20(stableCoin).transferFrom(user, address(this), amount);
+    }
+
+    function transferCollateral(
         address user,
         address token,
         uint256 amount
