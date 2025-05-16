@@ -25,6 +25,7 @@ contract LendingPoolContractTest is Test {
     address user = makeAddr("user");
     address lpTokenAddress;
     uint256 public deployer;
+    address vault;
 
     function setUp() public {
         console.log(address(this));
@@ -42,6 +43,7 @@ contract LendingPoolContractTest is Test {
             weth,
             deployer
         ) = helperConfig.activeNetworkConfig();
+        vault = lendingPoolContract.getVaultAddress();
     }
 
     // stateless fuzzs testing for the depositt function
@@ -55,7 +57,7 @@ contract LendingPoolContractTest is Test {
         uint256 initalLpTokenBalance = lpToken.balanceOf(user);
         vm.startPrank(user);
         ERC20Mock(weth).mint(user, amount);
-        ERC20Mock(weth).approve(address(lendingPoolContract), amount);
+        ERC20Mock(weth).approve(vault, amount);
         lendingPoolContract.depositLiquidity(weth, amount);
         vm.stopPrank();
         uint256 finalLiquidityPerToken = lendingPoolContract

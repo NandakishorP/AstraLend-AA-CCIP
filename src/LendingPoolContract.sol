@@ -1211,4 +1211,8 @@ contract LendingPoolContract is
     function getInterestRateModelAddress() public view returns (address) {
         return interestRateModelAddress;
     }
+
+    function getVaultAddress() external view returns (address) {
+        return address(vault);
+    }
 }

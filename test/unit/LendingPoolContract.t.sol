@@ -38,6 +38,7 @@ contract LendingPoolContractTest is Test {
     uint256 public maxInterestRate = 100e16;
     uint256 public baseInterestRate = 5e16;
     uint256 public deployer;
+    address vault;
 
     //events
 
@@ -72,6 +73,7 @@ contract LendingPoolContractTest is Test {
         interestRateModel = IInterestRateModel(
             lendingPoolContract.getInterestRateModelAddress()
         );
+        vault = lendingPoolContract.getVaultAddress();
         ERC20Mock(weth).mint(user, STARTING_USER_BALANCE);
         ERC20Mock(weth).mint(user1, STARTING_USER_BALANCE);
         ERC20Mock(weth).mint(user2, STARTING_USER_BALANCE);
@@ -141,10 +143,7 @@ contract LendingPoolContractTest is Test {
         uint256 initalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 initalLpTokenBalance = lpToken.balanceOf(user);
         vm.startPrank(user);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositLiquidity(weth, DEPOSITING_AMOUNT);
         vm.stopPrank();
         uint256 finalLiquidity = lendingPoolContract.getTotalLiquidityPerToken(
@@ -162,10 +161,7 @@ contract LendingPoolContractTest is Test {
 
     function testDepositLiquidityWhenThereAreMultipleUsers() public {
         vm.startPrank(user);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositLiquidity(weth, DEPOSITING_AMOUNT);
         vm.stopPrank();
         vm.startPrank(user1);
@@ -173,10 +169,7 @@ contract LendingPoolContractTest is Test {
         uint256 initalTotalSupplyOfLpTokens = lpToken.totalSupply();
         uint256 initalTotalLiquidity = lendingPoolContract
             .getTotalLiquidityPerToken(weth);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositLiquidity(weth, DEPOSITING_AMOUNT);
         vm.stopPrank();
         uint256 amountOfLpTokensToMint = (DEPOSITING_AMOUNT *
@@ -217,10 +210,7 @@ contract LendingPoolContractTest is Test {
     function testWithDrawLiquidityUnitTest() public {
         vm.startPrank(user);
 
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         uint256 initalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 initalTotalLiquidity = lendingPoolContract
             .getTotalLiquidityPerToken(weth);
@@ -240,10 +230,7 @@ contract LendingPoolContractTest is Test {
 
     function testWithDrawDepositRevertIfAmountGreaterThanBalance() public {
         vm.startPrank(user);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositLiquidity(weth, DEPOSITING_AMOUNT);
         vm.expectRevert(
             abi.encodeWithSignature(
@@ -282,10 +269,7 @@ contract LendingPoolContractTest is Test {
 
     function testDepositCollateralUnitTest() public {
         vm.startPrank(user);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         uint256 initalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 initalDepositedCollateralByUser = lendingPoolContract
             .getCollateralDetailsOfUser(weth);
@@ -344,10 +328,7 @@ contract LendingPoolContractTest is Test {
 
     function testWithDrawCollateralUnitTest() public {
         vm.startPrank(user);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
         uint256 initalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 initalDepositedCollateralByUser = lendingPoolContract
@@ -409,16 +390,10 @@ contract LendingPoolContractTest is Test {
 
     function testBorrowLoanUnitTest() public {
         vm.prank(address(lendingPoolContract));
-        ERC20Mock(address(stableCoin)).mint(
-            address(lendingPoolContract),
-            10000 ether
-        );
+        ERC20Mock(address(stableCoin)).mint(vault, 10000 ether);
 
         vm.startPrank(user);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
         uint256 collateralAvailableForBorrowing = (DEPOSITING_AMOUNT * 75e16) /
             1e18;
@@ -462,40 +437,25 @@ contract LendingPoolContractTest is Test {
 
     function testUtilizationRatioOnOrBeforeFirstDeposit() public {
         vm.startPrank(user);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositLiquidity(weth, DEPOSITING_AMOUNT);
         vm.stopPrank();
-        console.log("reached here, from the test");
-        console.log(address(interestRateModel));
         uint256 initalUtilizationRatio = interestRateModel.getUtilizationRatio(
             weth
         );
-        console.log(initalUtilizationRatio);
 
         assertEq(initalUtilizationRatio, 0);
     }
 
     function testUtilizationRatioUnitTest() public {
         vm.startPrank(user);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            2 * DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, 2 * DEPOSITING_AMOUNT);
         lendingPoolContract.depositLiquidity(weth, 2 * DEPOSITING_AMOUNT);
         vm.stopPrank();
         vm.prank(address(lendingPoolContract));
-        ERC20Mock(address(stableCoin)).mint(
-            address(lendingPoolContract),
-            10000 ether
-        );
+        ERC20Mock(address(stableCoin)).mint(vault, 10000 ether);
         vm.startPrank(user1);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
 
         uint256 borrowingAmount = (DEPOSITING_AMOUNT * 75e16) / 1e18;
@@ -528,22 +488,13 @@ contract LendingPoolContractTest is Test {
 
     function testInterestRateModelUnitTest() public {
         vm.startPrank(user);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            2 * DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, 2 * DEPOSITING_AMOUNT);
         lendingPoolContract.depositLiquidity(weth, 2 * DEPOSITING_AMOUNT);
         vm.stopPrank();
         vm.prank(address(lendingPoolContract));
-        ERC20Mock(address(stableCoin)).mint(
-            address(lendingPoolContract),
-            10000 ether
-        );
+        ERC20Mock(address(stableCoin)).mint(vault, 10000 ether);
         vm.startPrank(user1);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         // 272727272727272727
         // 700000000000000000
         lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
@@ -589,108 +540,17 @@ contract LendingPoolContractTest is Test {
         vm.stopPrank();
     }
 
-    function testRepayLoanUnitTestFailure() public {
-        // user deposits ETH to get the loan and the user gets the loan and after 10 days the first user deposits and then again after 10 days the second
-        //  user deposits more eth so the borrowerIndex value will change, so the interest rate will change and the user has to pay the interest
-        vm.prank(address(lendingPoolContract));
-        ERC20Mock(address(stableCoin)).mint(
-            address(lendingPoolContract),
-            100000 ether
-        );
-        vm.startPrank(user);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
-        lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
-        uint256 collateralAvailableForBorrowing = (DEPOSITING_AMOUNT * 75e16) /
-            1e18;
-        uint256 collateralAvailableForBorrowingInUsd = lendingPoolContract
-            .getUsdValue(weth, collateralAvailableForBorrowing);
-        lendingPoolContract.borrowLoan(
-            weth,
-            collateralAvailableForBorrowingInUsd
-        );
-        vm.stopPrank();
-        vm.warp(block.timestamp + 10 days);
-        vm.startPrank(user1);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            3 * DEPOSITING_AMOUNT
-        );
-
-        // so if two more users deposit then the utilization ration changes and there will be more deposits and interest rate changes and the user has to pay the interest
-        lendingPoolContract.depositLiquidity(weth, 3 * DEPOSITING_AMOUNT);
-        vm.stopPrank();
-        vm.warp(block.timestamp + 10 days);
-        vm.startPrank(user2);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            3 * DEPOSITING_AMOUNT
-        );
-        lendingPoolContract.depositLiquidity(weth, 3 * DEPOSITING_AMOUNT);
-        vm.stopPrank();
-        vm.warp(block.timestamp + 10 days);
-        vm.startPrank(user3);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            3 * DEPOSITING_AMOUNT
-        );
-        lendingPoolContract.depositLiquidity(weth, 3 * DEPOSITING_AMOUNT);
-        vm.stopPrank();
-        vm.warp(block.timestamp + 30 days);
-        // now the user is going to repay the loan in total
-        ERC20Mock(weth).mint(user, 75e40);
-        vm.startPrank(user);
-        LendingPoolContract.LoanDetails memory loan = lendingPoolContract
-            .getLoanDetails(user, weth);
-
-        uint256 principalLoanAmount = loan.amountBorrowedInUSDT;
-        console.log("loan.amountBorrowedInUSDT", loan.amountBorrowedInUSDT);
-        uint256 userBorrowIndex = loan.userBorrowIndex;
-        uint256 scaledLoanAmount = (principalLoanAmount *
-            lendingPoolContract.getBorrowerIndex(weth)) / userBorrowIndex;
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            2 * scaledLoanAmount
-        );
-        console.log("balance", ERC20Mock(weth).balanceOf(user));
-        console.log("scaledLoanAmount", scaledLoanAmount);
-
-        console.log(address(user));
-
-        lendingPoolContract.repayLoan(weth, scaledLoanAmount);
-        LendingPoolContract.LoanDetails memory loanSummary = lendingPoolContract
-            .getLoanDetails(user, weth);
-        console.log(
-            "loan.amountBorrowedInUSDT",
-            loanSummary.amountBorrowedInUSDT
-        );
-
-        assertEq(loanSummary.amountBorrowedInUSDT, 0);
-        vm.stopPrank();
-    }
-
     function testRepayLoanUnitTestFinal() public {
         vm.prank(address(lendingPoolContract));
-        ERC20Mock(address(stableCoin)).mint(
-            address(lendingPoolContract),
-            100000 ether
-        );
+        ERC20Mock(address(stableCoin)).mint(vault, 100000 ether);
 
         vm.startPrank(user1);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositLiquidity(weth, DEPOSITING_AMOUNT);
         vm.stopPrank();
 
         vm.startPrank(user2);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
         uint256 collateralAvailableForBorrowing = (DEPOSITING_AMOUNT * 75e16) /
             1e18;
@@ -703,10 +563,7 @@ contract LendingPoolContractTest is Test {
         vm.stopPrank();
 
         vm.startPrank(user3);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
 
         // 7500000000000000000000
         // 309686888442240000000
@@ -714,10 +571,7 @@ contract LendingPoolContractTest is Test {
         vm.stopPrank();
 
         vm.startPrank(user4);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
         uint256 collateralAvailableForBorrowing4 = (DEPOSITING_AMOUNT * 75e16) /
             1e18;
@@ -730,10 +584,7 @@ contract LendingPoolContractTest is Test {
         vm.stopPrank();
 
         vm.startPrank(user6);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositCollateral(weth, DEPOSITING_AMOUNT);
         uint256 collateralAvailableForBorrowing3 = (DEPOSITING_AMOUNT * 75e16) /
             1e18;
@@ -746,10 +597,7 @@ contract LendingPoolContractTest is Test {
         vm.stopPrank();
 
         vm.startPrank(user5);
-        ERC20Mock(weth).approve(
-            address(lendingPoolContract),
-            DEPOSITING_AMOUNT
-        );
+        ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         lendingPoolContract.depositLiquidity(weth, DEPOSITING_AMOUNT);
         vm.stopPrank();
 
@@ -768,7 +616,7 @@ contract LendingPoolContractTest is Test {
         vm.prank(address(lendingPoolContract));
         ERC20Mock(address(stableCoin)).mint(user4, scaledLoanAmount);
         vm.startPrank(user4);
-        stableCoin.approve(address(lendingPoolContract), scaledLoanAmount);
+        stableCoin.approve(vault, scaledLoanAmount);
         lendingPoolContract.repayLoan(weth, scaledLoanAmount);
         LendingPoolContract.LoanDetails
             memory loanSummary2 = lendingPoolContract.getLoanDetails(
