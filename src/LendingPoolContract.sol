@@ -879,7 +879,6 @@ contract LendingPoolContract is
             address[] memory tokens = s_loanTokensForTheUser[borrower];
             for (uint256 j = 0; j < tokens.length; j++) {
                 LoanDetails storage loan = s_loanDetails[msg.sender][tokens[j]];
-
                 uint256 collateralValueInUSD = getUsdValue(
                     tokens[j],
                     loan.collateralUsed
