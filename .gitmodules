@@ -13,3 +13,6 @@
 [submodule "lib/huffmate"]
 	path = lib/huffmate
 	url = https://github.com/huff-language/huffmate
+[submodule "lib/ccip"]
+	path = lib/ccip
+	url = https://github.com/smartcontractkit/ccip

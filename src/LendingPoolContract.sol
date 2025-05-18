@@ -969,7 +969,6 @@ contract LendingPoolContract is
      *
      * @param token The address of the token for which interest needs to be accrued.
      */
-
     function _accuredInterest(address token) private {
         uint256 timeElapsed = block.timestamp - s_lastAccuralTime[token];
         if (timeElapsed == 0) return;

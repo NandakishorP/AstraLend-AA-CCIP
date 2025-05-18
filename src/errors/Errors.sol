@@ -63,3 +63,12 @@ library VaultErrors {
     error Vault__UnauthorizedAccess();
     error Vault__VaultPaused();
 }
+
+library CrossChainMessageSenderErrors {
+    error CrossChainMessageSender__InsufficentFees();
+    error CrossChainMessageSender__DestinationChainNotAllowed(
+        uint64 destinationChainSelector
+    );
+    error CrossChainMessageSender__InvalidReceiverAddress();
+    error CrossChainMessageSender__InsufficentBalance();
+}
