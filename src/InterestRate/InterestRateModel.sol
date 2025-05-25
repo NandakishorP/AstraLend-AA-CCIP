@@ -18,12 +18,12 @@ contract InterestRateModel is IInterestRateModel, Ownable {
         lendingPoolContract = ILendingPoolContract(_lendingPool);
     }
 
-    modifier isTokenApprovedByTheContract(address token) {
+    modifier isTokenApprovedByTheContract(uint64 tokenId) {
         if (address(lendingPoolContract) == address(0)) {
             revert InterestRateModelErrors
                 .InterestRateModel__TokenNotSupported();
         }
-        if (lendingPoolContract.getPriceFeedAddress(token) == address(0)) {
+        if (lendingPoolContract.getPriceFeedAddress(tokenId) == address(0)) {
             revert InterestRateModelErrors
                 .InterestRateModel__TokenNotSupported();
         }
@@ -53,44 +53,44 @@ contract InterestRateModel is IInterestRateModel, Ownable {
      * @notice Returns the current utilization ratio for a specific token.
      * @dev Utilization ratio is calculated as the total borrowed amount
      * divided by the total liquidity available for the token.
-     * @param token The address of the token to query.
+     * @param tokenId The address of the token to query.
      * @return The utilization ratio scaled by a precision factor.
      */
 
     function getUtilizationRatio(
-        address token
-    ) external view isTokenApprovedByTheContract(token) returns (uint256) {
-        return _calculateUtilizationRatio(token);
+        uint64 tokenId
+    ) external view isTokenApprovedByTheContract(tokenId) returns (uint256) {
+        return _calculateUtilizationRatio(tokenId);
     }
 
     /**
      * @notice Returns the current interest rate for borrowing a specific token.
      * @dev The interest rate is determined based on the utilization ratio and
      * adjusts dynamically using a kink-based model.
-     * @param token The address of the token to query.
+     * @param tokenId The address of the token to query.
      * @return The annual interest rate scaled by a precision factor.
      */
 
     function getInterestRate(
-        address token
-    ) external view isTokenApprovedByTheContract(token) returns (uint256) {
-        return _calculateInterestRate(token);
+        uint64 tokenId
+    ) external view isTokenApprovedByTheContract(tokenId) returns (uint256) {
+        return _calculateInterestRate(tokenId);
     }
 
     /**
      * @notice Calculates the utilization ratio of a given asset class.
      * @dev The utilization ratio is determined by dividing the total amount borrowed by the liquidity available for that asset class.
-     * @param assetClass The address of the asset class (e.g., a specific token or collateral type).
+     * @param assetClassId The address of the asset class (e.g., a specific token or collateral type).
      * @return utilizationRatio The calculated utilization ratio (scaled by PRECISION).
      */
 
     function _calculateUtilizationRatio(
-        address assetClass
+        uint64 assetClassId
     ) internal view returns (uint256 utilizationRatio) {
         uint256 liquidityPerAssetClass = lendingPoolContract
-            .getTotalLiquidityPerToken(assetClass);
+            .getTotalLiquidityPerToken(assetClassId);
         uint256 amountBorrowedPerAssetClass = lendingPoolContract
-            .getTotalBorroweedForAToken(assetClass);
+            .getTotalBorroweedForAToken(assetClassId);
         if (liquidityPerAssetClass == 0) {
             return 0;
         }
@@ -115,14 +115,14 @@ contract InterestRateModel is IInterestRateModel, Ownable {
      * 1. If the utilization ratio is below `kink`, the rate is a linear function of the utilization ratio.
      * 2. If the utilization ratio exceeds `kink`, the rate increases sharply as the utilization ratio rises.
      *
-     * @param token The address of the token for which the interest rate is being calculated.
+     * @param tokenId The address of the token for which the interest rate is being calculated.
      * @return interestRate The calculated interest rate, scaled by the precision factor.
      */
 
     function _calculateInterestRate(
-        address token
+        uint64 tokenId
     ) public view returns (uint256) {
-        uint256 utilizationRatio = _calculateUtilizationRatio(token);
+        uint256 utilizationRatio = _calculateUtilizationRatio(tokenId);
         uint256 interestRate;
         if (utilizationRatio < kink) {
             interestRate =

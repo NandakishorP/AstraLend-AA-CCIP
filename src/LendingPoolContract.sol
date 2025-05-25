@@ -87,7 +87,7 @@ contract LendingPoolContract is
     /// The individual borrower's interest can be calculated using the difference between the current index
     /// and the index at the time of borrowing.
 
-    mapping(address token => uint256 borrowerIndexOfToken)
+    mapping(uint64 tokenId => uint256 borrowerIndexOfToken)
         public s_borrowerIndex;
 
     /// @notice Records the last timestamp when interest was accrued for each token.
@@ -95,23 +95,22 @@ contract LendingPoolContract is
     /// which is essential for calculating how much new interest should be added to the borrower's debt.
     /// Interest accrual operations refer to this timestamp to keep interest calculations accurate and consistent.
 
-    mapping(address token => uint256) public s_lastAccuralTime;
+    mapping(uint64 tokenId => uint256) public s_lastAccuralTime;
 
     /// @dev mapping the token addresses to the pricefeed addresses
 
-    mapping(address collateralTokenAddress => address priceFeedAddress)
+    mapping(uint64 collateralTokenId => address priceFeedAddress)
         private s_priceFeed;
 
     /// @dev Mapping to track deposited token amounts per user
     /// @custom:structure mapping(user => mapping(token => amount))
 
-    mapping(address => mapping(address => uint256))
-        private s_depositDetailsOfUser;
+    mapping(uint256 chainId => mapping(address user => mapping(uint64 tokenId => uint256 amount))) s_depositDetailsOfUser;
 
     /// @dev Tracks loan details for each user per token
     /// @custom:structure mapping(user => mapping(tokenAddress => LoanDetails))
 
-    mapping(address user => mapping(address tokenAddress => LoanDetails loanDetails))
+    mapping(address user => mapping(uint64 tokenId => LoanDetails loanDetails))
         private s_loanDetails;
 
     /// @dev Stores the LP token balance of each user
@@ -125,40 +124,45 @@ contract LendingPoolContract is
 
     /// @dev the total liquidity locked in the protocol at the moment for a particular token
 
-    mapping(address token => uint256 totaliquidityOfToken) private s_liquidity;
+    mapping(uint64 tokenId => uint256 totaliquidityOfToken) private s_liquidity;
 
     /// @dev Tracks the total collateral deposited for each token
     /// @custom:structure mapping(token => totalCollateralAmount)
 
-    mapping(address token => uint256 totalCollateralOfToken)
+    mapping(uint64 tokenId => uint256 totalCollateralOfToken)
         private s_tokenCollateral;
 
     /// @dev Stores the collateral amount for each user per token
     /// @custom:structure mapping(user => mapping(token => collateralAmount))
 
-    mapping(address user => mapping(address token => uint256 amount))
+    mapping(address user => mapping(uint64 tokenId => uint256 amount))
         private s_collateralDetails;
 
     /// @dev Stores the locked collateral amount for each user per token
     /// @custom:structure mapping(user => mapping(token => lockedCollateralAmount))
 
-    mapping(address user => mapping(address token => uint256 amount))
+    mapping(address user => mapping(uint64 tokenId => uint256 amount))
         private s_lockedCollateralDetails;
 
     /// @dev checking whether the user has any active loans
 
-    mapping(address user => mapping(address token => bool))
+    mapping(address user => mapping(uint64 tokenId => bool))
         private s_isBorrower;
 
     /// @notice Tracks the total amount borrowed for each token across all users.
     /// @dev Maps a token address to the cumulative borrowed amount in that token.
 
-    mapping(address token => uint256 amountBorrowed)
+    mapping(uint64 tokenId => uint256 amountBorrowed)
         private s_amountBorrowedInToken;
     /// @notice Stores the list of tokens for which a user has active loans.
     /// @dev Maps a user address to an array of token addresses they have borrowed against.
 
-    mapping(address user => address[] tokens) private s_loanTokensForTheUser;
+    mapping(address user => uint64[] tokens) private s_loanTokensForTheUser;
+
+    // mapping the tokenId to the tokenAddress
+
+    mapping(uint64 tokenId => address tokenAddress) private s_tokenAddresses;
+    mapping(address tokenAddress => uint64 tokenId) private s_tokenId;
 
     /// @dev the array of borrowers
     address[] private borrowers;
@@ -340,10 +344,10 @@ contract LendingPoolContract is
 
     /// @dev this prevent the user from depositing money from chains that is not supported on this contract
 
-    modifier isTokenApprovedByTheContract(address token) {
-        if (s_priceFeed[token] == address(0)) {
+    modifier isTokenApprovedByTheContract(uint64 tokenId) {
+        if (s_priceFeed[tokenId] == address(0)) {
             revert LendingPoolContractErrors
-                .LendingPoolContract__TokenIsNotAllowedToDeposit(token);
+                .LendingPoolContract__TokenIsNotAllowedToDeposit();
         }
         _;
     }
@@ -373,10 +377,12 @@ contract LendingPoolContract is
                 );
         }
         for (uint256 i = 0; i < tokenAddresses.length; i++) {
-            s_borrowerIndex[tokenAddresses[i]] = 1e18;
-            s_lastAccuralTime[tokenAddresses[i]] = block.timestamp;
-            s_priceFeed[tokenAddresses[i]] = priceFeedAddresses[i];
+            s_borrowerIndex[uint64(i)] = 1e18;
+            s_lastAccuralTime[uint64(i)] = block.timestamp;
+            s_priceFeed[uint64(i)] = priceFeedAddresses[i];
             s_tokenAddressesList.push(tokenAddresses[i]);
+            s_tokenAddresses[uint64(i)] = tokenAddresses[i];
+            s_tokenId[tokenAddresses[i]] = uint64(i);
         }
         interestRateModelAddress = interestRateModelAddress_;
         i_stableCoinAddress = stableCoinAddress;
@@ -404,7 +410,7 @@ contract LendingPoolContract is
      *      - Otherwise:
      *        `mintAmount = (amount * totalSupplyOfLpToken) / currentTotalLiquidity`
      *
-     * @param token The address of the ERC20 token to be deposited.
+     * @param tokenId The tokenId of the ERC20 token to be deposited.
      * @param amount The amount of tokens to deposit.
      *
      * @custom:requirements
@@ -420,18 +426,19 @@ contract LendingPoolContract is
      */
 
     function depositLiquidity(
-        address token,
+        uint64 tokenId,
         uint256 amount
     )
         external
         payable
         isGreaterThanZero(amount)
-        isTokenApprovedByTheContract(token)
+        isTokenApprovedByTheContract(tokenId)
         nonReentrant
     {
         //safeTraansfer function is used instead of the normal transfer,it ensures that the user has approved necessery funds for the contract
-        vault.depositLiquidity(msg.sender, token, amount);
-        uint256 currentTotalLiquidity = s_liquidity[token];
+        address tokenAddress = s_tokenAddresses[tokenId];
+        vault.depositLiquidity(msg.sender, tokenAddress, amount);
+        uint256 currentTotalLiquidity = s_liquidity[tokenId];
         uint256 totalSupplyOfLpToken = ILpToken(lpToken).totalSupply();
         uint256 amountOfLpTokensToMint;
         if (totalSupplyOfLpToken == 0 || currentTotalLiquidity == amount) {
@@ -441,12 +448,12 @@ contract LendingPoolContract is
                 (amount * totalSupplyOfLpToken) /
                 currentTotalLiquidity;
         }
-        s_depositDetailsOfUser[msg.sender][token] += amount;
-        s_liquidity[token] += amount;
+        s_depositDetailsOfUser[block.chainid][msg.sender][tokenId] += amount;
+        s_liquidity[tokenId] += amount;
         _mintLpTokens(msg.sender, amountOfLpTokensToMint);
         emit LiquidityDeposited(
             msg.sender,
-            token,
+            tokenAddress,
             amount,
             amountOfLpTokensToMint
         );
@@ -460,7 +467,7 @@ contract LendingPoolContract is
     /// details and the total collateral for the token. Additionally, the token is safely transferred from
     /// the user's address to the contract address.
     ///
-    /// @param token The address of the ERC20 token that the user is depositing as collateral.
+    /// @param tokenId The tokenId of the ERC20 token that the user is depositing as collateral.
     /// @param amount The amount of the ERC20 token that the user wishes to deposit as collateral.
     ///
     /// @notice This function emits a `CollateralDeposited` event once the deposit is successfully made.
@@ -476,19 +483,20 @@ contract LendingPoolContract is
     /// @custom:modifier isTokenApprovedByTheContract(token) Ensures that the specified token is allowed for collateral deposit.
 
     function depositCollateral(
-        address token,
+        uint64 tokenId,
         uint256 amount
     )
         external
         payable
         isGreaterThanZero(amount)
-        isTokenApprovedByTheContract(token)
+        isTokenApprovedByTheContract(tokenId)
         nonReentrant
     {
-        vault.depositCollateral(msg.sender, token, amount);
-        s_collateralDetails[msg.sender][token] += amount;
-        s_tokenCollateral[token] += amount;
-        emit CollateralDeposited(msg.sender, token, amount);
+        address tokenAddress = s_tokenAddresses[tokenId];
+        vault.depositCollateral(msg.sender, tokenAddress, amount);
+        s_collateralDetails[msg.sender][tokenId] += amount;
+        s_tokenCollateral[tokenId] += amount;
+        emit CollateralDeposited(msg.sender, tokenAddress, amount);
     }
 
     /**
@@ -497,7 +505,7 @@ contract LendingPoolContract is
      *      It uses `safeTransfer` to securely transfer the tokens from the contract to the user.
      *      The function prevents reentrancy attacks using the `nonReentrant` modifier.
      *
-     * @param token The address of the ERC20 token to be withdrawn.
+     * @param tokenId The tokenId of the ERC20 token to be withdrawn.
      * @param amount The amount of tokens the user wishes to withdraw.
      *
      * Requirements:
@@ -515,23 +523,26 @@ contract LendingPoolContract is
      */
 
     function withdrawDeposit(
-        address token,
+        uint64 tokenId,
         uint256 amount
     )
         external
         isGreaterThanZero(amount)
-        isTokenApprovedByTheContract(token)
+        isTokenApprovedByTheContract(tokenId)
         nonReentrant
     {
-        uint256 depositAmount = s_depositDetailsOfUser[msg.sender][token];
+        address tokenAddress = s_tokenAddresses[tokenId];
+        uint256 depositAmount = s_depositDetailsOfUser[block.chainid][
+            msg.sender
+        ][tokenId];
         if (depositAmount < amount) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__InsufficentBalance(amount, depositAmount);
         }
-        s_depositDetailsOfUser[msg.sender][token] -= amount;
-        s_liquidity[token] -= amount;
-        vault.withdrawDeposit(msg.sender, token, amount);
-        emit DepositWithdrawn(msg.sender, token, amount);
+        s_depositDetailsOfUser[block.chainid][msg.sender][tokenId] -= amount;
+        s_liquidity[tokenId] -= amount;
+        vault.withdrawDeposit(msg.sender, tokenAddress, amount);
+        emit DepositWithdrawn(msg.sender, tokenAddress, amount);
     }
 
     /**
@@ -553,7 +564,7 @@ contract LendingPoolContract is
         uint256 balance = ILpToken(lpToken).balanceOf(msg.sender);
         if (balance < amount) {
             revert LendingPoolContractErrors
-                .LendingPoolContract__InsufficentLpTokenBalance(balance);
+                .LendingPoolContract__InsufficentLpTokenBalance();
         }
         _burnLpTokens(msg.sender, amount);
         emit LpTokensBurned(msg.sender, amount);
@@ -595,48 +606,52 @@ contract LendingPoolContract is
     /// @custom:modifier isTokenApprovedByTheContract(token) Ensures that the token is allowed to be used for collateral deposit.
 
     function borrowLoan(
-        address token,
+        uint64 tokenId,
         uint256 amount
-    ) external isGreaterThanZero(amount) isTokenApprovedByTheContract(token) {
-        if (s_loanDetails[msg.sender][token].amountBorrowedInUSDT > 0) {
+    ) external isGreaterThanZero(amount) isTokenApprovedByTheContract(tokenId) {
+        address tokenAddress = s_tokenAddresses[tokenId];
+        if (s_loanDetails[msg.sender][tokenId].amountBorrowedInUSDT > 0) {
             revert LendingPoolContractErrors.LendingPoolContract__LoanPending();
         }
-        uint256 depositedCollateral = s_collateralDetails[msg.sender][token];
+        uint256 depositedCollateral = s_collateralDetails[msg.sender][tokenId];
 
         // Calculate the amount of collateral available for lending, considering the LTV ratio
         uint256 collateralAvailableForLending = (depositedCollateral * LTV) /
             PRECISION;
         uint256 collateralAvailableForLendingInUsd = getUsdValue(
-            token,
+            tokenId,
             collateralAvailableForLending
         );
         if (amount > collateralAvailableForLendingInUsd) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__NotEnoughCollateral();
         }
-        if (!s_isBorrower[msg.sender][token]) {
+        if (!s_isBorrower[msg.sender][tokenId]) {
             borrowers.push(msg.sender);
-            s_loanTokensForTheUser[msg.sender].push(token);
-            s_isBorrower[msg.sender][token] = true;
+            s_loanTokensForTheUser[msg.sender].push(tokenId);
+            s_isBorrower[msg.sender][tokenId] = true;
         }
         totalBorrowed += amount;
-        s_amountBorrowedInToken[token] += getTokenAmountFromUsd(token, amount);
-        LoanDetails storage loan = s_loanDetails[msg.sender][token];
+        s_amountBorrowedInToken[tokenId] += getTokenAmountFromUsd(
+            tokenId,
+            amount
+        );
+        LoanDetails storage loan = s_loanDetails[msg.sender][tokenId];
         // Update the loan details: amount borrowed, collateral used, last update, and due date
         loan.amountBorrowedInUSDT += amount;
         loan.principalAmount += amount;
-        loan.asset = token;
-        loan.collateralUsed = getTokenAmountFromUsd(token, amount);
+        loan.asset = tokenAddress;
+        loan.collateralUsed = getTokenAmountFromUsd(tokenId, amount);
         loan.lastUpdate = block.timestamp;
         loan.dueDate = block.timestamp + 180 days;
         loan.token = i_stableCoinAddress;
-        loan.userBorrowIndex = s_borrowerIndex[token];
+        loan.userBorrowIndex = s_borrowerIndex[tokenId];
         //updating the other params
-        s_collateralDetails[msg.sender][token] -= depositedCollateral;
-        s_lockedCollateralDetails[msg.sender][token] += depositedCollateral;
-        _accuredInterest(token); //this accuredInterest will update the global value for the borrowerIndex for the particular token everytime a user takes loan from the contract
+        s_collateralDetails[msg.sender][tokenId] -= depositedCollateral;
+        s_lockedCollateralDetails[msg.sender][tokenId] += depositedCollateral;
+        _accuredInterest(tokenId); //this accuredInterest will update the global value for the borrowerIndex for the particular token everytime a user takes loan from the contract
         vault.transferLoanAmount(msg.sender, amount);
-        emit LoanBorrowed(msg.sender, token, loan, amount);
+        emit LoanBorrowed(msg.sender, tokenAddress, loan, amount);
     }
 
     /**
@@ -678,7 +693,7 @@ contract LendingPoolContract is
      *         - `LoanRepaid` for tracking how much was paid, how much went to interest, and how much to principal.
      *         - `CollateralReleased` if the entire loan was cleared.
      *
-     * @param token The ERC20 token address representing the borrowed asset (usually a stablecoin like USDT or USDC).
+     * @param tokenId The ERC20 token id representing the borrowed asset (usually a stablecoin like USDT or USDC).
      * @param amount The amount the borrower wants to repay.
      *
      * @custom:example
@@ -693,19 +708,20 @@ contract LendingPoolContract is
      */
 
     function repayLoan(
-        address token,
+        uint64 tokenId,
         uint256 amount
     )
         external
-        isTokenApprovedByTheContract(token)
+        isTokenApprovedByTheContract(tokenId)
         isGreaterThanZero(amount)
         nonReentrant
     {
-        LoanDetails storage loan = s_loanDetails[msg.sender][token];
+        address tokenAddress = s_tokenAddresses[tokenId];
+        LoanDetails storage loan = s_loanDetails[msg.sender][tokenId];
         uint256 principalLoanAmount = loan.amountBorrowedInUSDT;
         uint256 userBorrowIndex = loan.userBorrowIndex;
         uint256 scaledLoanAmount = (principalLoanAmount *
-            s_borrowerIndex[token]) / userBorrowIndex;
+            s_borrowerIndex[tokenId]) / userBorrowIndex;
         uint256 interestAccrued = scaledLoanAmount - principalLoanAmount;
         uint256 interestPaidNow = 0;
         uint256 principalRepaid = 0;
@@ -733,18 +749,18 @@ contract LendingPoolContract is
         loan.amountBorrowedInUSDT = scaledLoanAmount;
         loan.interestPaid += interestPaidNow;
         totalBorrowed -= principalRepaid;
-        _accuredInterest(token);
+        _accuredInterest(tokenId);
 
         if (loan.amountBorrowedInUSDT == 0) {
-            _releaseCollateral(msg.sender, token);
-            emit CollateralReleased(msg.sender, token, amount);
+            _releaseCollateral(msg.sender, tokenId);
+            emit CollateralReleased(msg.sender, tokenAddress, amount);
         } else {
             loan.lastUpdate = block.timestamp;
-            loan.userBorrowIndex = s_borrowerIndex[token];
+            loan.userBorrowIndex = s_borrowerIndex[tokenId];
         }
         emit LoanRepaid(
             msg.sender,
-            token,
+            tokenAddress,
             amount,
             interestPaidNow,
             principalRepaid
@@ -756,27 +772,31 @@ contract LendingPoolContract is
      * @dev Checks if the user has enough collateral deposited before allowing the withdrawal.
      * Updates the user's and contract's collateral records and transfers the tokens back to the user.
      *
-     * @param token The address of the token to withdraw.
+     * @param tokenId The address of the token to withdraw.
      * @param amount The amount of the token the user wants to withdraw.
      */
 
     function withdrawCollateral(
-        address token,
+        uint64 tokenId,
         uint256 amount
     )
         external
-        isTokenApprovedByTheContract(token)
+        isTokenApprovedByTheContract(tokenId)
         isGreaterThanZero(amount)
         nonReentrant
     {
-        if (s_collateralDetails[msg.sender][token] < amount) {
+        if (s_collateralDetails[msg.sender][tokenId] < amount) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__InvalidRequestAmount();
         }
-        s_collateralDetails[msg.sender][token] -= amount;
-        s_tokenCollateral[token] -= amount;
-        vault.transferCollateral(msg.sender, token, amount);
-        emit CollateralWithdrawed(msg.sender, token, amount);
+        s_collateralDetails[msg.sender][tokenId] -= amount;
+        s_tokenCollateral[tokenId] -= amount;
+        vault.transferCollateral(msg.sender, s_tokenAddresses[tokenId], amount);
+        emit CollateralWithdrawed(
+            msg.sender,
+            s_tokenAddresses[tokenId],
+            amount
+        );
     }
 
     // liquidate function
@@ -796,7 +816,7 @@ contract LendingPoolContract is
      * 5. If the collateral is above the liquidation threshold, the liquidation is rejected, and the loan remains active.
      *
      * @param user The address of the borrower whose loan is being liquidated.
-     * @param token The address of the token used for the loan (the token collateralized by the borrower).
+     * @param tokenId The address of the token used for the loan (the token collateralized by the borrower).
      *
      *
      *
@@ -820,34 +840,38 @@ contract LendingPoolContract is
 
     function liquidate(
         address user,
-        address token
-    ) internal isTokenApprovedByTheContract(token) nonReentrant {
-        LoanDetails storage loan = s_loanDetails[user][token];
+        uint64 tokenId
+    ) internal isTokenApprovedByTheContract(tokenId) nonReentrant {
+        address tokenAddress = s_tokenAddresses[tokenId];
+        LoanDetails storage loan = s_loanDetails[user][tokenId];
         uint256 loanAmount = loan.amountBorrowedInUSDT;
         if (loanAmount == 0) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__LoanIsNotActive();
         }
-        uint256 collateralValueInUSD = getUsdValue(token, loan.collateralUsed);
+        uint256 collateralValueInUSD = getUsdValue(
+            tokenId,
+            loan.collateralUsed
+        );
         uint256 liquidationValue = (loanAmount * LIQUIDATION_PENALTY) /
             PRECISION;
         if (collateralValueInUSD > liquidationValue && loan.penaltyCount < 2) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__NotLiquidatable();
         }
-        s_amountBorrowedInToken[token] -= loan.collateralUsed;
-        s_liquidity[token] += loan.collateralUsed;
+        s_amountBorrowedInToken[tokenId] -= loan.collateralUsed;
+        s_liquidity[tokenId] += loan.collateralUsed;
         if (loanAmount > totalBorrowed) {
             totalBorrowed = 0;
         } else {
             totalBorrowed -= loanAmount;
         }
-        delete s_isBorrower[user][token];
-        delete s_loanDetails[user][token];
-        delete s_lockedCollateralDetails[user][token];
+        delete s_isBorrower[user][tokenId];
+        delete s_loanDetails[user][tokenId];
+        delete s_lockedCollateralDetails[user][tokenId];
         emit LoanLiquidated(
             user,
-            token,
+            tokenAddress,
             loanAmount,
             collateralValueInUSD,
             liquidationValue
@@ -876,7 +900,7 @@ contract LendingPoolContract is
     {
         for (uint256 i = 0; i < borrowers.length; i++) {
             address borrower = borrowers[i];
-            address[] memory tokens = s_loanTokensForTheUser[borrower];
+            uint64[] memory tokens = s_loanTokensForTheUser[borrower];
             for (uint256 j = 0; j < tokens.length; j++) {
                 LoanDetails storage loan = s_loanDetails[msg.sender][tokens[j]];
                 uint256 collateralValueInUSD = getUsdValue(
@@ -906,11 +930,11 @@ contract LendingPoolContract is
      * produced by `checkUpkeep`.
      */
     function performUpkeep(bytes calldata performData) external override {
-        (address borrower, address token) = abi.decode(
+        (address borrower, uint64 tokenId) = abi.decode(
             performData,
-            (address, address)
+            (address, uint64)
         );
-        LoanDetails storage loan = s_loanDetails[borrower][token];
+        LoanDetails storage loan = s_loanDetails[borrower][tokenId];
 
         if (block.timestamp < loan.dueDate) {
             return;
@@ -922,7 +946,7 @@ contract LendingPoolContract is
                 (loan.amountBorrowedInUSDT * LIQUIDATION_PENALTY) /
                 PRECISION;
         } else {
-            liquidate(borrower, token);
+            liquidate(borrower, tokenId);
         }
     }
 
@@ -937,18 +961,18 @@ contract LendingPoolContract is
      * @notice Releases the user's locked collateral if the loan is fully repaid.
      * @dev Reverts if the user still has an outstanding loan.
      * @param user The address of the borrower.
-     * @param token The address of the token used as collateral.
+     * @param tokenId The address of the token used as collateral.
      */
 
-    function _releaseCollateral(address user, address token) internal {
-        LoanDetails storage loan = s_loanDetails[user][token];
+    function _releaseCollateral(address user, uint64 tokenId) internal {
+        LoanDetails storage loan = s_loanDetails[user][tokenId];
         if (loan.amountBorrowedInUSDT != 0) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__LoanStillPending();
         }
-        s_amountBorrowedInToken[token] -= loan.collateralUsed;
-        s_lockedCollateralDetails[user][token] -= loan.collateralUsed;
-        s_collateralDetails[user][token] += loan.collateralUsed;
+        s_amountBorrowedInToken[tokenId] -= loan.collateralUsed;
+        s_lockedCollateralDetails[user][tokenId] -= loan.collateralUsed;
+        s_collateralDetails[user][tokenId] += loan.collateralUsed;
     }
 
     /**
@@ -967,20 +991,20 @@ contract LendingPoolContract is
      * After accruing interest, the function updates the last accrual time (`s_lastAccuralTime[token]`)
      * to the current block timestamp.
      *
-     * @param token The address of the token for which interest needs to be accrued.
+     * @param tokenId The address of the token for which interest needs to be accrued.
      */
-    function _accuredInterest(address token) private {
-        uint256 timeElapsed = block.timestamp - s_lastAccuralTime[token];
+    function _accuredInterest(uint64 tokenId) private {
+        uint256 timeElapsed = block.timestamp - s_lastAccuralTime[tokenId];
         if (timeElapsed == 0) return;
         uint256 annualInterestRate = IInterestRateModel(
             interestRateModelAddress
-        ).getInterestRate(token);
+        ).getInterestRate(tokenId);
         uint256 ratePerSecond = annualInterestRate / 365 days;
         uint256 interestFactor = ratePerSecond * timeElapsed;
-        s_borrowerIndex[token] +=
-            (s_borrowerIndex[token] * interestFactor) /
+        s_borrowerIndex[tokenId] +=
+            (s_borrowerIndex[tokenId] * interestFactor) /
             1e18;
-        s_lastAccuralTime[token] = block.timestamp;
+        s_lastAccuralTime[tokenId] = block.timestamp;
     }
 
     /**
@@ -1053,26 +1077,27 @@ contract LendingPoolContract is
      */
 
     function getTotalLiquidityPerToken(
-        address token
+        uint64 tokenId
     ) public view returns (uint256) {
-        return s_liquidity[token];
+        return s_liquidity[tokenId];
     }
 
     /**
-     * @notice Returns the deposited balance of a specific user for a given token.
+     * @notice Returns the deposited balance of a sp
+     * ecific user for a given token.
      * @dev This is a view function that retrieves the user's deposit balance from the storage mapping `s_depositDetailsOfUser`.
      *
      * @param user The address of the user whose balance is being queried.
-     * @param token The address of the token for which the user's balance is requested.
+     * @param tokenId The address of the token for which the user's balance is requested.
      *
      * @return The user's deposited balance for the specified token.
      */
 
     function getUserBalance(
         address user,
-        address token
+        uint64 tokenId
     ) public view returns (uint256) {
-        return s_depositDetailsOfUser[user][token];
+        return s_depositDetailsOfUser[block.chainid][user][tokenId];
     }
 
     /**
@@ -1102,8 +1127,8 @@ contract LendingPoolContract is
         uint256 totalLiquidity = 0;
         for (uint256 i = 0; i < s_tokenAddressesList.length; i++) {
             totalLiquidity += getUsdValue(
-                s_tokenAddressesList[i],
-                s_liquidity[s_tokenAddressesList[i]]
+                uint64(i),
+                s_liquidity[s_tokenId[s_tokenAddressesList[i]]]
             );
         }
         return totalLiquidity;
@@ -1114,7 +1139,7 @@ contract LendingPoolContract is
      * @dev This function fetches the latest token price from the associated Chainlink price feed
      *      and calculates the equivalent USD value. It assumes the price feed provides data in a
      *      standard format with appropriate decimals.
-     * @param token The address of the token whose USD value needs to be calculated.
+     * @param tokenId The address of the token whose USD value needs to be calculated.
      * @param amount The amount of the token for which the USD value is required.
      * @return The USD value of the specified token amount, with additional precision applied.
      *
@@ -1123,11 +1148,11 @@ contract LendingPoolContract is
      * - The price feed must return a valid and non-negative price.
      */
     function getUsdValue(
-        address token,
+        uint64 tokenId,
         uint256 amount
     ) public view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
-            s_priceFeed[token]
+            s_priceFeed[tokenId]
         );
         (, int256 price, , , ) = priceFeed.latestRoundData();
         return
@@ -1142,17 +1167,17 @@ contract LendingPoolContract is
      * The calculation uses the price feed data, and converts the USD value into
      * the token amount, factoring in the precision settings.
      *
-     * @param token The address of the token to convert.
+     * @param tokenId The address of the token to convert.
      * @param usdValue The amount in USD to convert into the corresponding token amount.
      * @return The equivalent amount of the token for the given USD value.
      */
 
     function getTokenAmountFromUsd(
-        address token,
+        uint64 tokenId,
         uint256 usdValue
     ) public view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
-            s_priceFeed[token]
+            s_priceFeed[tokenId]
         );
         (, int256 price, , , ) = priceFeed.latestRoundData();
         require(price > 0, "Invalid price feed data");
@@ -1164,60 +1189,60 @@ contract LendingPoolContract is
 
     /**
      * @notice Returns the amount of collateral a user has deposited for a specific token.
-     * @param token The address of the token.
+     * @param tokenId The address of the token.
      * @return The amount of collateral deposited by the caller for the given token.
      */
 
     function getCollateralDetailsOfUser(
-        address token
+        uint64 tokenId
     ) external view returns (uint256) {
-        return s_collateralDetails[msg.sender][token];
+        return s_collateralDetails[msg.sender][tokenId];
     }
 
     /**
      * @notice Returns the total amount of a specific token deposited as collateral by all users.
-     * @param token The address of the token.
+     * @param tokenId The address of the token.
      * @return The total amount of that token used as collateral across the platform.
      */
 
     function getCollateralPerToken(
-        address token
+        uint64 tokenId
     ) external view returns (uint256) {
-        return s_tokenCollateral[token];
+        return s_tokenCollateral[tokenId];
     }
 
     /**
      * @notice Returns the total amount borrowed for a specific token.
-     * @param token The address of the token.
+     * @param tokenId The address of the token.
      * @return The total amount borrowed for the specified token.
      */
 
     function getTotalBorroweedForAToken(
-        address token
+        uint64 tokenId
     ) external view returns (uint256) {
-        return s_amountBorrowedInToken[token];
+        return s_amountBorrowedInToken[tokenId];
     }
 
     /**
      * @notice Retrieves the loan details of a specific user for a given token.
      * @param user The address of the user.
-     * @param token The address of the token used for the loan.
+     * @param tokenId The address of the token used for the loan.
      * @return The loan details (amount borrowed, collateral used, etc.) of the user for the specified token.
      */
 
     function getLoanDetails(
         address user,
-        address token
+        uint64 tokenId
     ) public view returns (LoanDetails memory) {
-        return s_loanDetails[user][token];
+        return s_loanDetails[user][tokenId];
     }
 
-    function getPriceFeedAddress(address token) public view returns (address) {
-        return s_priceFeed[token];
+    function getPriceFeedAddress(uint64 tokenId) public view returns (address) {
+        return s_priceFeed[tokenId];
     }
 
-    function getBorrowerIndex(address token) public view returns (uint256) {
-        return s_borrowerIndex[token];
+    function getBorrowerIndex(uint64 tokenId) public view returns (uint256) {
+        return s_borrowerIndex[tokenId];
     }
 
     function getInterestRateModelAddress() public view returns (address) {

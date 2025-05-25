@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 library LendingPoolContractErrors {
     error LendingPoolContract__AmountShouldBeGreaterThanZero();
-    error LendingPoolContract__TokenIsNotAllowedToDeposit(address token);
+    error LendingPoolContract__TokenIsNotAllowedToDeposit();
     error LendingPoolContract__TokenAddressAndPriceFeedAddressMismatch(
         uint256 tokenAddressLength,
         uint256 priceFeedAddressLength
@@ -20,9 +20,7 @@ library LendingPoolContractErrors {
     error LendingPoolContract__NotLiquidatable();
     error LendingPoolContract__LoanStillPending();
     error LendingPoolContract__LpTokenMintFailed();
-    error LendingPoolContract__InsufficentLpTokenBalance(
-        uint256 availableBalance
-    );
+    error LendingPoolContract__InsufficentLpTokenBalance();
 }
 
 library FlashLenderContractErrors {

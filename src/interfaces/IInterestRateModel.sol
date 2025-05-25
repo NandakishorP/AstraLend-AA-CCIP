@@ -2,7 +2,9 @@
 pragma solidity ^0.8.24;
 
 interface IInterestRateModel {
-    function getUtilizationRatio(address token) external view returns (uint256);
+    function getUtilizationRatio(
+        uint64 tokenId
+    ) external view returns (uint256);
 
-    function getInterestRate(address token) external view returns (uint256);
+    function getInterestRate(uint64 tokenId) external view returns (uint256);
 }

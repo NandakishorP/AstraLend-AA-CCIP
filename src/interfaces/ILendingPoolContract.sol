@@ -3,12 +3,14 @@ pragma solidity ^0.8.24;
 
 interface ILendingPoolContract {
     function getTotalLiquidityPerToken(
-        address token
+        uint64 tokenId
     ) external view returns (uint256);
 
     function getTotalBorroweedForAToken(
-        address token
+        uint64 tokenId
     ) external view returns (uint256);
 
-    function getPriceFeedAddress(address token) external view returns (address);
+    function getPriceFeedAddress(
+        uint64 tokenId
+    ) external view returns (address);
 }
