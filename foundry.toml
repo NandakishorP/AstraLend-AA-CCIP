@@ -3,8 +3,7 @@ src = "src"
 out = "out"
 libs = ["lib"]
 rpc_endpoints = { eth = "https://eth-sepolia.g.alchemy.com/v2/tBB8RGqhj5jDY_HavrsouAD9KmayCNkd", arb = "https://arb-sepolia.g.alchemy.com/v2/tBB8RGqhj5jDY_HavrsouAD9KmayCNkd"}
-
-
+gas_limit = "1000000000"  
 remappings = [
     '@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts',
     '@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts',

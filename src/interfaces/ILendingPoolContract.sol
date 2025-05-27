@@ -13,4 +13,10 @@ interface ILendingPoolContract {
     function getPriceFeedAddress(
         uint64 tokenId
     ) external view returns (address);
+
+    function getTokenAddressFromTokenId(
+        uint64 tokenId
+    ) external view returns (address);
+
+    function receiveTokensFromOneChainToOther(bytes memory data) external;
 }

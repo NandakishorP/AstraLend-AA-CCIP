@@ -1,281 +1,192 @@
-// // SPDX-License-Identifier: MIT
-// pragma solidity ^0.8.24;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
 
-// import {Test, console} from "forge-std/Test.sol";
-// import {CCIPLocalSimulatorFork, Register} from "@chainlink-local/src/ccip/CCIPLocalSimulatorFork.sol";
-// import {LendingPoolContract} from "../../src/LendingPoolContract.sol";
-// import {HelperConfig} from "../../script/HelperConfig.s.sol";
-// import {InterestRateModel} from "../../src/InterestRate/InterestRateModel.sol";
-// import {LpToken} from "../../src/tokens/LpTokenContract.sol";
-// import {StableCoin} from "../../src/tokens/StableCoin.sol";
-// import {IRouterClient, Client} from "@chainlink-local/lib/chainlink-ccip/chains/evm/contracts/interfaces/IRouterClient.sol";
-// import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
+import {Test, console} from "forge-std/Test.sol";
+import {CCIPLocalSimulatorFork, Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
+import {BurnMintERC677Helper, BurnMintERC677} from "@chainlink/local/src/ccip/BurnMintERC677Helper.sol";
+import {MockV3Aggregator} from "../mocks/MockV3Aggregator.sol";
+import {LendingPoolContract} from "../../src/LendingPoolContract.sol";
+import {InterestRateModel} from "../../src/InterestRate/InterestRateModel.sol";
+import {StableCoin} from "../../src/tokens/StableCoin.sol";
+import {LpToken} from "../../src/tokens/LpTokenContract.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-// contract CrossChainLending is Test {
-//     uint256 sepoliaFork;
-//     uint256 arbSepoliaFork;
-//     address owner = makeAddr("owner");
-//     address user = makeAddr("user");
-//     uint256 public constant STARTING_USER_BALANCE = 20 ether;
-//     uint256 public constant DEPOSITING_AMOUNT = 5 ether;
-//     CCIPLocalSimulatorFork ccipLocalSimulatorFork;
-//     Register.NetworkDetails sepoliaNetworkDetails;
-//     Register.NetworkDetails arbSepoliaNetworkDetails;
-//     LendingPoolContract lendingPoolcontractSepolia;
-//     LendingPoolContract lendingPoolcontractarbSepolia;
-//     address wethPriceFeedAddressSepolia;
-//     address wethPriceFeedAddressarbSepolia;
-//     address wbtcPriceFeedAddressSepolia;
-//     address wbtcPriceFeedAddressarbSepolia;
-//     address[] public tokenAddressesarbSepolia;
-//     address[] public tokenAddressesSepolia;
-//     address[] public priceFeedAddressesSepolia;
-//     address[] public priceFeedAddressesarbSepolia;
-//     HelperConfig helperConfigSepolia;
-//     HelperConfig helperConfigarbSepolia;
+contract CrossChainLending is Test {
+    CCIPLocalSimulatorFork public ccipLocalSimulatorFork;
+    BurnMintERC677Helper public wethSepolia;
+    BurnMintERC677Helper public wethArbSepolia;
+    Register.NetworkDetails sepoliaNetworkDetails;
 
-//     address vaultSepolia;
-//     address vaultarbSepolia;
+    Register.NetworkDetails arbSepoliaNetworkDetails;
+    uint256 sepoliaFork;
 
-//     address wethSepolia;
-//     address wbtcSepolia;
-//     address wetharbSepolia;
-//     address wbtcarbSepolia;
+    uint256 arbSepoliaFork;
 
-//     function setUp() public {
-//         sepoliaFork = vm.createSelectFork("eth");
-//         arbSepoliaFork = vm.createFork("arb");
-//         ccipLocalSimulatorFork = new CCIPLocalSimulatorFork();
-//         vm.makePersistent(address(ccipLocalSimulatorFork));
-//         sepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(
-//             block.chainid
-//         );
-//         helperConfigSepolia = new HelperConfig();
-//         (
-//             wethPriceFeedAddressSepolia,
-//             wbtcPriceFeedAddressSepolia,
-//             wethSepolia,
-//             wbtcSepolia,
+    MockV3Aggregator wethUsdPriceFeedAddressSepolia;
+    MockV3Aggregator wethUsdPriceFeedAddressArbSepolia;
 
-//         ) = helperConfigSepolia.activeNetworkConfig();
+    uint8 public constant DECIMALS = 8;
+    int256 public constant ETH_USD_PRICE = 1000e8;
 
-//         tokenAddressesSepolia = [wethSepolia, wbtcSepolia];
-//         priceFeedAddressesSepolia = [
-//             wethPriceFeedAddressSepolia,
-//             wbtcPriceFeedAddressSepolia
-//         ];
-//         vm.startPrank(owner);
+    address ownerSepolia = makeAddr("ownerSepolia");
+    address ownerArbSepolia = makeAddr("ownerArbSepolia");
+    address user = makeAddr("user");
 
-//         InterestRateModel interestRateModelSepolia = new InterestRateModel();
-//         StableCoin stableCoinSepolia = new StableCoin();
-//         LpToken lpTokenSepolia = new LpToken();
-//         ERC20Mock(wethSepolia).mint(user, STARTING_USER_BALANCE);
+    LendingPoolContract lendingPoolContractSepolia;
+    LendingPoolContract lendingPoolContractArbSepolia;
+    address[] public tokenAddressSepolia;
+    address[] public tokenAddressArbSepolia;
+    address[] public priceFeedAddressSepolia;
+    address[] public priceFeedAddressArbSepolia;
+    address vaultSepoliaAddress;
+    address vaultArbSepoliaAddress;
 
-//         lendingPoolcontractSepolia = new LendingPoolContract(
-//             tokenAddressesSepolia,
-//             priceFeedAddressesSepolia,
-//             address(stableCoinSepolia),
-//             address(lpTokenSepolia),
-//             address(interestRateModelSepolia),
-//             sepoliaNetworkDetails.routerAddress,
-//             sepoliaNetworkDetails.chainSelector,
-//             sepoliaNetworkDetails.linkAddress
-//         );
-//         vaultSepolia = lendingPoolcontractSepolia.getVaultAddress();
+    address arbCrossChainReceiverAddress;
 
-//         interestRateModelSepolia.setLendingPoolContract(
-//             address(lendingPoolcontractSepolia)
-//         );
-//         interestRateModelSepolia.transferOwnership(
-//             address(lendingPoolcontractSepolia)
-//         );
-//         stableCoinSepolia.transferOwnership(
-//             address(lendingPoolcontractSepolia)
-//         );
-//         lpTokenSepolia.transferOwnership(address(lendingPoolcontractSepolia));
-//         vm.stopPrank();
+    function setUp() public {
+        sepoliaFork = vm.createSelectFork("eth");
+        arbSepoliaFork = vm.createFork("arb");
+        ccipLocalSimulatorFork = new CCIPLocalSimulatorFork();
+        vm.makePersistent(address(ccipLocalSimulatorFork));
+        sepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(
+            block.chainid
+        );
+        wethSepolia = BurnMintERC677Helper(
+            sepoliaNetworkDetails.ccipBnMAddress
+        );
+        wethUsdPriceFeedAddressSepolia = new MockV3Aggregator(
+            DECIMALS,
+            ETH_USD_PRICE
+        );
+        vm.startPrank(ownerSepolia);
+        tokenAddressSepolia = [address(wethSepolia)];
+        priceFeedAddressSepolia = [address(wethUsdPriceFeedAddressSepolia)];
+        InterestRateModel interestRateModelSepolia = new InterestRateModel();
+        StableCoin stableCoinSepolia = new StableCoin();
+        LpToken lpTokenSepolia = new LpToken();
+        // 0xA8C0c11bf64AF62CDCA6f93D3769B88BdD7cb93D
 
-//         vm.selectFork(arbSepoliaFork);
+        lendingPoolContractSepolia = new LendingPoolContract(
+            tokenAddressSepolia,
+            priceFeedAddressSepolia,
+            address(stableCoinSepolia),
+            address(lpTokenSepolia),
+            address(interestRateModelSepolia),
+            sepoliaNetworkDetails.linkAddress,
+            sepoliaNetworkDetails.routerAddress
+        );
+        interestRateModelSepolia.setLendingPoolContract(
+            address(lendingPoolContractSepolia)
+        );
+        interestRateModelSepolia.transferOwnership(
+            address(lendingPoolContractSepolia)
+        );
+        stableCoinSepolia.transferOwnership(
+            address(lendingPoolContractSepolia)
+        );
+        lpTokenSepolia.transferOwnership(address(lendingPoolContractSepolia));
+        vm.stopPrank();
 
-//         arbSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(
-//             block.chainid
-//         );
-//         helperConfigarbSepolia = new HelperConfig();
-//         (
-//             wethPriceFeedAddressarbSepolia,
-//             wbtcPriceFeedAddressarbSepolia,
-//             wetharbSepolia,
-//             wbtcarbSepolia,
+        wethSepolia.drip(user);
+        ccipLocalSimulatorFork.requestLinkFromFaucet(user, 5 ether);
 
-//         ) = helperConfigarbSepolia.activeNetworkConfig();
+        address senderCCIPAddress = lendingPoolContractSepolia
+            .getCrossChainMessageSenderAddress();
 
-//         console.log("done");
+        vaultSepoliaAddress = lendingPoolContractSepolia.getVaultAddress();
 
-//         tokenAddressesarbSepolia = [wetharbSepolia, wbtcarbSepolia];
-//         priceFeedAddressesarbSepolia = [
-//             wethPriceFeedAddressarbSepolia,
-//             wbtcPriceFeedAddressarbSepolia
-//         ];
+        vm.selectFork(arbSepoliaFork);
 
-//         vm.startPrank(owner);
+        wethUsdPriceFeedAddressArbSepolia = new MockV3Aggregator(
+            DECIMALS,
+            ETH_USD_PRICE
+        );
+        arbSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(
+            block.chainid
+        );
+        console.log("address:", arbSepoliaNetworkDetails.ccipBnMAddress);
+        wethArbSepolia = BurnMintERC677Helper(
+            arbSepoliaNetworkDetails.ccipBnMAddress
+        );
 
-//         InterestRateModel interestRateModelarbSepolia = new InterestRateModel();
-//         StableCoin stableCoinarbSepolia = new StableCoin();
-//         LpToken lpTokenarbSepolia = new LpToken();
+        vm.startPrank(ownerArbSepolia);
 
-//         lendingPoolcontractarbSepolia = new LendingPoolContract(
-//             tokenAddressesarbSepolia,
-//             priceFeedAddressesarbSepolia,
-//             address(stableCoinarbSepolia),
-//             address(lpTokenarbSepolia),
-//             address(interestRateModelarbSepolia),
-//             arbSepoliaNetworkDetails.routerAddress,
-//             arbSepoliaNetworkDetails.chainSelector,
-//             arbSepoliaNetworkDetails.linkAddress
-//         );
-//         vaultarbSepolia = lendingPoolcontractarbSepolia.getVaultAddress();
+        tokenAddressArbSepolia = [address(wethArbSepolia)];
+        priceFeedAddressArbSepolia = [
+            address(wethUsdPriceFeedAddressArbSepolia)
+        ];
+        InterestRateModel interestRateModelArbSepolia = new InterestRateModel();
+        StableCoin stableCoinArbSepolia = new StableCoin();
+        LpToken lpTokenArbSepolia = new LpToken();
 
-//         console.log(
-//             "lendingPoolcontractaebSepolia",
-//             address(lendingPoolcontractarbSepolia)
-//         );
-//         interestRateModelarbSepolia.setLendingPoolContract(
-//             address(lendingPoolcontractarbSepolia)
-//         );
-//         interestRateModelarbSepolia.transferOwnership(
-//             address(lendingPoolcontractarbSepolia)
-//         );
-//         stableCoinarbSepolia.transferOwnership(
-//             address(lendingPoolcontractarbSepolia)
-//         );
-//         lpTokenarbSepolia.transferOwnership(
-//             address(lendingPoolcontractarbSepolia)
-//         );
-//         vm.stopPrank();
-//     }
+        lendingPoolContractArbSepolia = new LendingPoolContract(
+            tokenAddressArbSepolia,
+            priceFeedAddressArbSepolia,
+            address(stableCoinArbSepolia),
+            address(lpTokenArbSepolia),
+            address(interestRateModelArbSepolia),
+            arbSepoliaNetworkDetails.linkAddress,
+            arbSepoliaNetworkDetails.routerAddress
+        );
+        lendingPoolContractArbSepolia.setallowListedSenders(senderCCIPAddress);
+        interestRateModelArbSepolia.setLendingPoolContract(
+            address(lendingPoolContractArbSepolia)
+        );
+        interestRateModelArbSepolia.transferOwnership(
+            address(lendingPoolContractArbSepolia)
+        );
+        stableCoinArbSepolia.transferOwnership(
+            address(lendingPoolContractArbSepolia)
+        );
+        lpTokenArbSepolia.transferOwnership(
+            address(lendingPoolContractArbSepolia)
+        );
+        arbCrossChainReceiverAddress = lendingPoolContractArbSepolia
+            .getCrossChainMessageReceiverAddress();
+        vaultArbSepoliaAddress = lendingPoolContractArbSepolia.getVaultAddress();
 
-//     // function transferTokens(
-//     //     uint256 amountToSend,
-//     //     uint256 localFork,
-//     //     uint256 remoteFork,
-//     //     address localToken,
-//     //     address remoteToken,
-//     //     Register.NetworkDetails memory localNetworkDetails,
-//     //     Register.NetworkDetails memory remoteNetworkDetails,
-//     //     LendingPoolContract loaclLendingPool,
-//     //     LendingPoolContract remoteLendingPool
-//     // ) public {
-//     //     vm.selectFork(localFork);
+        vm.stopPrank();
+        wethArbSepolia.drip(user);
+    }
 
-//     //     v
-//     // }
-//     // function _buildCCIPMessage(
-//     //     address _receiver,
-//     //     bytes memory _data,
-//     //     address _token,
-//     //     uint256 _amount
-//     // ) private pure returns (Client.EVM2AnyMessage memory) {
-//     //     Client.EVMTokenAmount[] memory tokenAmounts;
-//     //     if (_token != address(0) && _amount > 0) {
-//     //         tokenAmounts = new Client.EVMTokenAmount[](1);
-//     //         tokenAmounts[0] = Client.EVMTokenAmount({
-//     //             token: _token,
-//     //             amount: _amount
-//     //         });
-//     //     } else {
-//     //         tokenAmounts = new Client.EVMTokenAmount[](0);
-//     //     }
-//     //     return
-//     //         Client.EVM2AnyMessage({
-//     //             receiver: abi.encode(_receiver),
-//     //             data: _data,
-//     //             tokenAmounts: tokenAmounts,
-//     //             extraArgs: Client._argsToBytes(
-//     //                 Client.EVMExtraArgsV2({
-//     //                     gasLimit: 100_000,
-//     //                     allowOutOfOrderExecution: false
-//     //                 })
-//     //             ),
-//     //             feeToken: address(0)
-//     //         });
-//     // }
+    function testIstrue() public {
+        vm.selectFork(arbSepoliaFork);
 
-//     enum ActionType {
-//         DEPOSIT,
-//         TRANSFER,
-//         BORROW,
-//         REPAY
-//     }
+        vm.startPrank(user);
+        BurnMintERC677(wethArbSepolia).approve(vaultArbSepoliaAddress, 1 ether);
+        lendingPoolContractArbSepolia.depositLiquidity(0, 1 ether);
+        vm.selectFork(sepoliaFork);
 
-//     struct CrossChainPayload {
-//         ActionType action;
-//         address user;
-//         string message;
-//     }
+        vm.startPrank(user);
+        BurnMintERC677(wethSepolia).approve(vaultSepoliaAddress, 1 ether);
 
-//     function testTransferTokens() public {
-//         vm.selectFork(arbSepoliaFork);
+        lendingPoolContractSepolia.depositLiquidity(0, 1 ether);
 
-//         uint64 destinationChainSelector = arbSepoliaNetworkDetails
-//             .chainSelector;
-//         address _receiver = lendingPoolcontractarbSepolia
-//             .getCCIPMessageReceiverAddress();
+        uint256 fees = lendingPoolContractSepolia.getFee(
+            arbCrossChainReceiverAddress,
+            0,
+            1 ether,
+            true,
+            arbSepoliaNetworkDetails.chainSelector,
+            ""
+        );
+        IERC20(sepoliaNetworkDetails.linkAddress).approve(
+            address(lendingPoolContractSepolia),
+            fees
+        );
 
-//         vm.selectFork(sepoliaFork);
+        lendingPoolContractSepolia.transferTokensFromOneChainToOtherChain(
+            arbCrossChainReceiverAddress,
+            arbSepoliaNetworkDetails.chainSelector,
+            0,
+            1 ether,
+            true,
+            ""
+        );
+        vm.stopPrank();
 
-//         vm.startPrank(user);
-//         ERC20Mock(wethSepolia).approve(
-//             address(vaultSepolia),
-//             DEPOSITING_AMOUNT
-//         );
-
-//         lendingPoolcontractSepolia.depositLiquidity(
-//             wethSepolia,
-//             DEPOSITING_AMOUNT
-//         );
-
-//         // uint256 fee = lendingPoolcontractSepolia.getFees(
-//         //     destinationChainSelector,
-//         //     wethSepolia,
-//         //     DEPOSITING_AMOUNT
-//         // );
-
-//         Client.EVMTokenAmount[]
-//             memory tokenAmounts = new Client.EVMTokenAmount[](1);
-//         tokenAmounts[0] = Client.EVMTokenAmount({
-//             token: wethSepolia,
-//             amount: DEPOSITING_AMOUNT
-//         });
-//         bytes memory _data = abi.encode(
-//             CrossChainPayload({
-//                 action: ActionType.TRANSFER,
-//                 user: msg.sender,
-//                 message: ""
-//             })
-//         );
-
-//         Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
-//             receiver: abi.encode(_receiver),
-//             data: _data,
-//             tokenAmounts: tokenAmounts,
-//             extraArgs: Client._argsToBytes(
-//                 Client.EVMExtraArgsV1({gasLimit: 200_000})
-//             ),
-//             feeToken: address(0)
-//         });
-
-//         uint256 fee = IRouterClient(sepoliaNetworkDetails.routerAddress).getFee(
-//             destinationChainSelector,
-//             message
-//         );
-
-//         lendingPoolcontractSepolia.crossChainTransferOfTokens{value: fee}(
-//             wethSepolia,
-//             DEPOSITING_AMOUNT,
-//             destinationChainSelector,
-//             true
-//         );
-
-//         vm.stopPrank();
-//     }
-// }
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+        uint256 balance = lendingPoolContractArbSepolia.getUserBalance(user, 0);
+        assertEq(balance, 2 ether);
+    }
+}

@@ -81,4 +81,12 @@ contract Vault is ReentrancyGuard, Ownable {
     ) external nonReentrant onlyLendingPool notPaused {
         IERC20(token).safeTransfer(user, amount);
     }
+
+    function transferToken(
+        address token,
+        address to,
+        uint256 amount
+    ) external onlyLendingPool nonReentrant notPaused {
+        IERC20(token).safeTransfer(to, amount);
+    }
 }

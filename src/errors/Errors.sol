@@ -21,6 +21,9 @@ library LendingPoolContractErrors {
     error LendingPoolContract__LoanStillPending();
     error LendingPoolContract__LpTokenMintFailed();
     error LendingPoolContract__InsufficentLpTokenBalance();
+    error LendingPoolContract__InsufficentFees();
+    error LendingPoolContract__TransferFailed();
+    error LendingPoolContract__InvalidRequest();
 }
 
 library FlashLenderContractErrors {

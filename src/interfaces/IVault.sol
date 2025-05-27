@@ -29,4 +29,6 @@ interface IVault {
         address token,
         uint256 amount
     ) external;
+
+    function transferToken(address token, address to, uint256 amount) external;
 }

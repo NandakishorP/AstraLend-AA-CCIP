@@ -38,7 +38,9 @@ contract DeployLendingPoolContract is Script {
             priceFeedAddresses,
             address(stableCoin),
             address(lpToken),
-            address(interestRateModel)
+            address(interestRateModel),
+            address(0),
+            address(0)
         );
         interestRateModel.setLendingPoolContract(address(lendingPoolcontract));
         interestRateModel.transferOwnership(address(lendingPoolcontract));

@@ -77,17 +77,20 @@ contract Demo is Test {
 
         uint256 fees = sender.getFee(
             address(receiver),
-            someText,
+            abi.encode(someText),
             arbSepoliaNetworkDetails.chainSelector,
             sepoliaNetworkDetails.ccipBnMAddress,
-            amountToSend
+            0,
+            false
         );
 
         vm.deal(address(sender), fees);
 
+        console.log("from test", sepoliaNetworkDetails.ccipBnMAddress);
+
         sender.sendViaNativeToken(
             address(receiver),
-            someText,
+            abi.encode(someText),
             arbSepoliaNetworkDetails.chainSelector,
             sepoliaNetworkDetails.ccipBnMAddress,
             amountToSend

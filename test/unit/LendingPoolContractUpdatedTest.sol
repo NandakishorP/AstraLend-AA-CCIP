@@ -87,7 +87,9 @@ contract UpdatedTest is Test {
             priceFeedAddresses,
             address(stableCoin),
             address(lpToken),
-            address(weth)
+            address(weth),
+            address(0),
+            address(0)
         );
     }
 

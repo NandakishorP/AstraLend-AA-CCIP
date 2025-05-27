@@ -15,6 +15,9 @@ import {LendingPoolContractErrors} from "./errors/Errors.sol";
 import {console} from "forge-std/console.sol";
 import {Vault} from "./Vault.sol";
 import {IVault} from "./interfaces/IVault.sol";
+import {CrossChainMessageSender} from "./ccip/CrossChainMessageSender.sol";
+import {CrossChainMessageReceiver} from "./ccip/CrossChainMessageReceiver.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 // Layout of Contract:
 // version
@@ -52,7 +55,8 @@ import {IVault} from "./interfaces/IVault.sol";
 contract LendingPoolContract is
     ReentrancyGuard,
     AutomationCompatibleInterface,
-    ILendingPoolContract
+    ILendingPoolContract,
+    Ownable
 {
     ////////////////////
     // Using directives
@@ -217,6 +221,12 @@ contract LendingPoolContract is
 
     IVault vault;
 
+    CrossChainMessageSender crossChainMessageSender;
+
+    CrossChainMessageReceiver crossChainMessageReceiver;
+
+    address linkToken;
+
     ////////////////////
     // Events
     ////////////////////
@@ -327,6 +337,18 @@ contract LendingPoolContract is
         uint256 liquidationPenalty
     );
 
+    event TokenTransferInitiated(
+        address indexed user,
+        uint64 tokenId,
+        uint64 destinationChainSelector,
+        uint256 amount
+    );
+    event TokensReceivedFromCrossChain(
+        address indexed user,
+        address indexed token,
+        uint256 amount
+    );
+
     ////////////////////
     // Modififer
     ////////////////////
@@ -367,8 +389,10 @@ contract LendingPoolContract is
         address[] memory priceFeedAddresses,
         address stableCoinAddress,
         address lpTokenAddress,
-        address interestRateModelAddress_
-    ) {
+        address interestRateModelAddress_,
+        address link_,
+        address router_
+    ) Ownable(msg.sender) {
         if (tokenAddresses.length != priceFeedAddresses.length) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__TokenAddressAndPriceFeedAddressMismatch(
@@ -388,6 +412,9 @@ contract LendingPoolContract is
         i_stableCoinAddress = stableCoinAddress;
         lpToken = lpTokenAddress;
         vault = IVault(address(new Vault(address(this), i_stableCoinAddress)));
+        crossChainMessageSender = new CrossChainMessageSender(link_, router_);
+        crossChainMessageReceiver = new CrossChainMessageReceiver(router_);
+        linkToken = link_;
     }
 
     ////////////////////
@@ -425,6 +452,7 @@ contract LendingPoolContract is
      * @custom:emit LiquidityDeposited Emitted when a successful deposit occurs.
      */
 
+    //  a particular note change the miniting amount as per the token, if not the user can deposit on any small token and gain large amount of lptokens in return
     function depositLiquidity(
         uint64 tokenId,
         uint256 amount
@@ -1252,4 +1280,247 @@ contract LendingPoolContract is
     function getVaultAddress() external view returns (address) {
         return address(vault);
     }
+
+    ///////////////////
+    // CCIP
+    ///////////////////
+
+    enum ActionType {
+        TRANSFER,
+        DEPOSIT
+    }
+
+    struct CrossChainPayLoad {
+        ActionType actionType;
+        address user;
+        uint64 crossChaintokenId;
+        uint256 amountToTransfer;
+        string messageToTransfer;
+    }
+
+    function transferTokensFromOneChainToOtherChain(
+        address receiver,
+        uint64 destinationChainSelector,
+        uint64 tokenId,
+        uint256 amount,
+        bool isLink,
+        string memory message
+    )
+        external
+        payable
+        isTokenApprovedByTheContract(tokenId)
+        isGreaterThanZero(amount)
+        nonReentrant
+    {
+        uint256 userBalance = s_depositDetailsOfUser[block.chainid][msg.sender][
+            tokenId
+        ];
+        if (userBalance < amount) {
+            revert LendingPoolContractErrors
+                .LendingPoolContract__InsufficentBalance(amount, userBalance);
+        }
+
+        bytes memory data = abi.encode(
+            CrossChainPayLoad({
+                actionType: ActionType.TRANSFER,
+                user: msg.sender,
+                crossChaintokenId: tokenId,
+                amountToTransfer: amount,
+                messageToTransfer: message
+            })
+        );
+        address tokenAddress = s_tokenAddresses[tokenId];
+        console.log("from contract", tokenAddress);
+        if (isLink) {
+            uint256 fees = crossChainMessageSender.getFee(
+                receiver,
+                data,
+                destinationChainSelector,
+                tokenAddress,
+                amount,
+                true
+            );
+
+            IERC20(linkToken).safeTransferFrom(
+                msg.sender,
+                address(crossChainMessageSender),
+                fees
+            );
+            s_depositDetailsOfUser[block.chainid][msg.sender][
+                tokenId
+            ] -= amount;
+
+            vault.transferToken(
+                tokenAddress,
+                address(crossChainMessageSender),
+                amount
+            );
+
+            crossChainMessageSender.sendViaLink(
+                receiver,
+                data,
+                destinationChainSelector,
+                tokenAddress,
+                amount
+            );
+        } else {
+            uint256 fees = crossChainMessageSender.getFee(
+                receiver,
+                data,
+                destinationChainSelector,
+                tokenAddress,
+                amount,
+                false
+            );
+            if (msg.value < fees) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__InsufficentFees();
+            }
+
+            (bool success, ) = payable(crossChainMessageSender).call{
+                value: fees
+            }("");
+            if (!success) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__TransferFailed();
+            }
+            s_depositDetailsOfUser[block.chainid][msg.sender][
+                tokenId
+            ] -= amount;
+            vault.transferToken(
+                address(crossChainMessageSender),
+                tokenAddress,
+                amount
+            );
+            crossChainMessageSender.sendViaNativeToken(
+                receiver,
+                data,
+                destinationChainSelector,
+                tokenAddress,
+                amount
+            );
+        }
+        emit TokenTransferInitiated(
+            msg.sender,
+            tokenId,
+            destinationChainSelector,
+            amount
+        );
+    }
+
+    function getFee(
+        address receiver,
+        uint64 tokenId,
+        uint256 amount,
+        bool isLink,
+        uint64 destinationChainSelector,
+        string memory message
+    ) external view returns (uint256 fees) {
+        bytes memory data = abi.encode(
+            CrossChainPayLoad({
+                actionType: ActionType.TRANSFER,
+                user: msg.sender,
+                crossChaintokenId: tokenId,
+                amountToTransfer: amount,
+                messageToTransfer: message
+            })
+        );
+        fees = crossChainMessageSender.getFee(
+            receiver,
+            data,
+            destinationChainSelector,
+            s_tokenAddresses[tokenId],
+            amount,
+            isLink
+        );
+    }
+
+    modifier onlyCrossChainMessageReceiverCanCall() {
+        if (msg.sender != address(crossChainMessageReceiver)) {
+            revert LendingPoolContractErrors
+                .LendingPoolContract__InvalidRequest();
+        }
+        _;
+    }
+
+    function receiveTokensFromOneChainToOther(
+        bytes memory data
+    ) external nonReentrant onlyCrossChainMessageReceiverCanCall {
+        console.log("inside this funcion");
+        CrossChainPayLoad memory payLoad = abi.decode(
+            data,
+            (CrossChainPayLoad)
+        );
+        address tokenAddress = s_tokenAddresses[payLoad.crossChaintokenId];
+        if (tokenAddress == address(0)) {
+            revert LendingPoolContractErrors
+                .LendingPoolContract__TokenIsNotAllowedToDeposit();
+        }
+        IERC20(tokenAddress).safeTransferFrom(
+            address(crossChainMessageReceiver),
+            address(vault),
+            payLoad.amountToTransfer
+        );
+
+        console.log("here");
+
+        uint256 current = s_depositDetailsOfUser[block.chainid][payLoad.user][
+            payLoad.crossChaintokenId
+        ];
+        console.log("here1");
+
+        uint256 updated = current + payLoad.amountToTransfer;
+        console.log("here2");
+        console.log("current =", current);
+        console.log("updated  =", updated);
+        console.log("payLoad.user =", payLoad.user);
+        console.log("crossChaintokenId =", payLoad.crossChaintokenId);
+        console.log("block.chainid =", block.chainid);
+
+        s_depositDetailsOfUser[block.chainid][payLoad.user][
+            payLoad.crossChaintokenId
+        ] = updated;
+
+        emit TokensReceivedFromCrossChain(
+            payLoad.user,
+            tokenAddress,
+            payLoad.amountToTransfer
+        );
+    }
+
+    function setReceiverAddress(address sender) external {
+        crossChainMessageReceiver.allowListedSender(sender, true);
+    }
+
+    function getCrossChainMessageReceiverAddress()
+        external
+        view
+        returns (address)
+    {
+        return address(crossChainMessageReceiver);
+    }
+
+    function getCrossChainMessageSenderAddress()
+        external
+        view
+        returns (address)
+    {
+        return address(crossChainMessageSender);
+    }
+
+    function getTokenAddressFromTokenId(
+        uint64 tokenId
+    ) external view returns (address) {
+        return s_tokenAddresses[tokenId];
+    }
+
+    function setallowListedSenders(address sender) external onlyOwner {
+        if (sender == address(0)) {
+            revert LendingPoolContractErrors
+                .LendingPoolContract__InvalidRequest();
+        }
+        crossChainMessageReceiver.allowListedSender(sender, true);
+    }
+
+    receive() external payable {}
 }
