@@ -82,12 +82,16 @@ contract UpdatedTest is Test {
                 priceFeedAddresses.length
             )
         );
+        uint64[] memory ar = new uint64[](0);
         new LendingPoolContract(
             tokenAddresses,
             priceFeedAddresses,
+            ar,
             address(stableCoin),
             address(lpToken),
             address(weth),
+            address(0),
+            address(0),
             address(0),
             address(0)
         );
@@ -245,13 +249,13 @@ contract UpdatedTest is Test {
         ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         uint256 initalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 initalDepositedCollateralByUser = lendingPoolContract
-            .getCollateralDetailsOfUser(0);
+            .getCollateralDetailsOfUser(user, 0);
         uint256 initalTotalCollateralDeposited = lendingPoolContract
             .getCollateralPerToken(0);
         lendingPoolContract.depositCollateral(0, DEPOSITING_AMOUNT);
         uint256 finalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 finalDepositedCollateralByUser = lendingPoolContract
-            .getCollateralDetailsOfUser(0);
+            .getCollateralDetailsOfUser(user, 0);
         uint256 finalTotalCollateralDeposited = lendingPoolContract
             .getCollateralPerToken(0);
         assertEq(initalUserBalance - finalUserBalance, DEPOSITING_AMOUNT);
@@ -304,13 +308,13 @@ contract UpdatedTest is Test {
         lendingPoolContract.depositCollateral(0, DEPOSITING_AMOUNT);
         uint256 initalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 initalDepositedCollateralByUser = lendingPoolContract
-            .getCollateralDetailsOfUser(0);
+            .getCollateralDetailsOfUser(user, 0);
         uint256 initalTotalCollateralDeposited = lendingPoolContract
             .getCollateralPerToken(0);
         lendingPoolContract.withdrawCollateral(0, DEPOSITING_AMOUNT);
         uint256 finalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 finalDepositedCollateralByUser = lendingPoolContract
-            .getCollateralDetailsOfUser(0);
+            .getCollateralDetailsOfUser(user, 0);
         uint256 finalTotalCollateralDeposited = lendingPoolContract
             .getCollateralPerToken(0);
         assertEq(initalUserBalance + DEPOSITING_AMOUNT, finalUserBalance);

@@ -24,6 +24,8 @@ library LendingPoolContractErrors {
     error LendingPoolContract__InsufficentFees();
     error LendingPoolContract__TransferFailed();
     error LendingPoolContract__InvalidRequest();
+    error LendingPoolContract__InvalidChainId();
+    error LendingPoolContract__InvalidAddress();
 }
 
 library FlashLenderContractErrors {
@@ -72,4 +74,8 @@ library CrossChainMessageSenderErrors {
     );
     error CrossChainMessageSender__InvalidReceiverAddress();
     error CrossChainMessageSender__InsufficentBalance();
+}
+
+library GlobalStateManagerErrors {
+    error GlobalStateManager__InvalidSender();
 }

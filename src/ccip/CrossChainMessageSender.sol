@@ -7,17 +7,37 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 using SafeERC20 for IERC20;
 import {console} from "forge-std/console.sol";
+import {ICrossChainMessageSender} from "./interfaces/ICrossChainMessageSender.sol";
 
 contract CrossChainMessageSender is Ownable {
     event TokenSend();
+    error InvalidAddress();
+    error InvalidSender(address);
     using SafeERC20 for IERC20;
     error NotEnoughBalance();
     address link;
     address router;
 
+    mapping(address caller => bool) private isAllowed;
+
+    modifier isCallerAllowed() {
+        if (!isAllowed[msg.sender]) {
+            revert InvalidSender(msg.sender);
+        }
+        _;
+    }
+
     constructor(address link_, address router_) Ownable(msg.sender) {
         link = link_;
         router = router_;
+        setAllowedCallers(msg.sender, true);
+    }
+
+    function setAllowedCallers(address sender, bool status) public onlyOwner {
+        if (sender == address(0)) {
+            revert InvalidAddress();
+        }
+        isAllowed[sender] = status;
     }
 
     function sendViaNativeToken(
@@ -26,7 +46,7 @@ contract CrossChainMessageSender is Ownable {
         uint64 destinationChainSelector,
         address _token,
         uint256 _amount
-    ) external onlyOwner returns (bytes32 messageId) {
+    ) external isCallerAllowed returns (bytes32 messageId) {
         Client.EVMTokenAmount[] memory tokenAmounts;
         if (_amount > 0 && _token != address(0)) {
             tokenAmounts = new Client.EVMTokenAmount[](1);
@@ -34,6 +54,7 @@ contract CrossChainMessageSender is Ownable {
                 token: _token,
                 amount: _amount
             });
+            IERC20(_token).approve(address(router), _amount);
         } else {
             tokenAmounts = new Client.EVMTokenAmount[](0);
         }
@@ -41,14 +62,15 @@ contract CrossChainMessageSender is Ownable {
             receiver: abi.encode(receiver),
             data: _data,
             tokenAmounts: tokenAmounts,
-            extraArgs: "",
+            extraArgs: Client._argsToBytes(
+                Client.EVMExtraArgsV1({gasLimit: 500_000})
+            ),
             feeToken: address(0)
         });
-        IERC20(_token).approve(address(router), _amount);
         uint256 fees = IRouterClient(router).getFee(
             destinationChainSelector,
             message
-        );
+        ) * 3;
 
         if (fees > address(this).balance) revert NotEnoughBalance();
 
@@ -73,6 +95,7 @@ contract CrossChainMessageSender is Ownable {
                 token: _token,
                 amount: _amount
             });
+            IERC20(_token).approve(address(router), _amount);
         } else {
             tokenAmounts = new Client.EVMTokenAmount[](0);
         }
@@ -84,12 +107,10 @@ contract CrossChainMessageSender is Ownable {
             feeToken: link
         });
 
-        IERC20(_token).approve(address(router), _amount);
-
-        uint256 fee = IRouterClient(router).getFee(
+        uint256 fee = (IRouterClient(router).getFee(
             destinationChainSelector,
             message
-        );
+        ) * 12) / 10;
 
         IERC20(link).approve(address(router), fee);
 
@@ -124,7 +145,9 @@ contract CrossChainMessageSender is Ownable {
             receiver: abi.encode(receiver),
             data: _data,
             tokenAmounts: tokenAmounts,
-            extraArgs: "",
+            extraArgs: Client._argsToBytes(
+                Client.EVMExtraArgsV1({gasLimit: 500_000})
+            ),
             feeToken: isLink ? link : address(0)
         });
         fees = IRouterClient(router).getFee(destinationChainSelector, message);

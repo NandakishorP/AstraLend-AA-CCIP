@@ -30,15 +30,19 @@ contract DeployLendingPoolContract is Script {
         priceFeedAddresses = [wethPriceFeedAddress, wbtcPriceFeedAddress];
         // this is to ensure that the trasnaction is comingg from the desired account only
         vm.startBroadcast(deployerKey);
+        uint64[] memory arr = new uint64[](0);
         InterestRateModel interestRateModel = new InterestRateModel();
         StableCoin stableCoin = new StableCoin();
         LpToken lpToken = new LpToken();
         LendingPoolContract lendingPoolcontract = new LendingPoolContract(
             tokenAddresses,
             priceFeedAddresses,
+            arr,
             address(stableCoin),
             address(lpToken),
             address(interestRateModel),
+            address(0),
+            address(0),
             address(0),
             address(0)
         );

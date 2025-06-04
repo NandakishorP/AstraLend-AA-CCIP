@@ -9,23 +9,16 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {console} from "forge-std/console.sol";
 using SafeERC20 for IERC20;
+import {ICCIPResponseHandler} from "./interfaces/ICCIPResponseHandler.sol";
 
 contract CrossChainMessageReceiver is CCIPReceiver, Ownable {
-    event MessageReceived(
-        address sender,
-        address token,
-        uint256 amount,
-        bytes32 messageId
-    );
+    address lendingPoolContract;
     error SenderNotAllowed(address sender);
-    error OnlyOwnerCanCall();
-
-    LendingPoolContract.CrossChainPayLoad public text;
-    address private lendingPoolContract;
-    address lastToken;
-    uint256 lastAmount;
+    event MessageReceived();
 
     mapping(address => bool) private allowListedSenders;
+
+    ICCIPResponseHandler ccipResponseHandler;
 
     modifier onlyAllowListedSenders(address sender) {
         if (!allowListedSenders[sender]) revert SenderNotAllowed(sender);
@@ -33,8 +26,12 @@ contract CrossChainMessageReceiver is CCIPReceiver, Ownable {
     }
 
     // here we need to allow the ccip to be called and it need to be approved the ledningpool contract
-    constructor(address router) CCIPReceiver(router) Ownable(msg.sender) {
+    constructor(
+        address router,
+        address ccipResponseHandler_
+    ) CCIPReceiver(router) Ownable(msg.sender) {
         lendingPoolContract = msg.sender;
+        ccipResponseHandler = ICCIPResponseHandler(ccipResponseHandler_);
     }
 
     function allowListedSender(
@@ -51,54 +48,6 @@ contract CrossChainMessageReceiver is CCIPReceiver, Ownable {
         override
         onlyAllowListedSenders(abi.decode(message.sender, (address)))
     {
-        text = abi.decode(
-            message.data,
-            (LendingPoolContract.CrossChainPayLoad)
-        );
-        if (message.destTokenAmounts.length > 0) {
-            lastToken = message.destTokenAmounts[0].token;
-            console.log(lastToken);
-            lastAmount = message.destTokenAmounts[0].amount;
-        }
-        console.log("message received and now ");
-        address tokenAddress = ILendingPoolContract(lendingPoolContract)
-            .getTokenAddressFromTokenId(text.crossChaintokenId);
-        console.log(tokenAddress);
-        console.log("going to print the new line");
-        (bool success, bytes memory data) = tokenAddress.staticcall(
-            abi.encodeWithSignature("balanceOf(address)", address(this))
-        );
-
-        if (success) {
-            uint256 balance = abi.decode(data, (uint256));
-            console.log("balance is", balance);
-        } else {
-            console.log("static call to balanceOf failed");
-        }
-        IERC20(tokenAddress).approve(
-            address(lendingPoolContract),
-            text.amountToTransfer
-        );
-        console.log("about to enter the function");
-        ILendingPoolContract(lendingPoolContract)
-            .receiveTokensFromOneChainToOther(message.data);
-        emit MessageReceived(
-            abi.decode(message.sender, (address)),
-            lastToken,
-            lastAmount,
-            message.messageId
-        );
-    }
-
-    function getText()
-        external
-        view
-        returns (LendingPoolContract.CrossChainPayLoad memory)
-    {
-        return text;
-    }
-
-    function getLastSendAmount() external view returns (uint256) {
-        return lastAmount;
+        ccipResponseHandler.ccipReceiver(message);
     }
 }

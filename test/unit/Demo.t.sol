@@ -1,103 +1,102 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+// // SPDX-License-Identifier: MIT
+// pragma solidity ^0.8.20;
 
-import {Test, Vm, console} from "forge-std/Test.sol";
+// import {Test, Vm, console} from "forge-std/Test.sol";
 
-import {CrossChainMessageSender} from "../../src/ccip/CrossChainMessageSender.sol";
-import {CrossChainMessageReceiver} from "../../src/ccip/CrossChainMessageReceiver.sol";
+// import {CrossChainMessageSender} from "../../src/ccip/CrossChainMessageSender.sol";
+// import {CrossChainMessageReceiver} from "../../src/ccip/CrossChainMessageReceiver.sol";
 
-import {CCIPLocalSimulatorFork, Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
-import {BurnMintERC677Helper} from "@chainlink/local/src/ccip/BurnMintERC677Helper.sol";
+// import {CCIPLocalSimulatorFork, Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
+// import {BurnMintERC677Helper} from "@chainlink/local/src/ccip/BurnMintERC677Helper.sol";
 
-contract Demo is Test {
-    CCIPLocalSimulatorFork public ccipLocalSimulatorFork;
-    CrossChainMessageSender public sender;
-    CrossChainMessageReceiver public receiver;
-    BurnMintERC677Helper public ccipBnMEthSepolia;
-    // BurnMintERC677Helper public ccipBnMEthSepolia;
+// contract Demo is Test {
+//     CCIPLocalSimulatorFork public ccipLocalSimulatorFork;
+//     CrossChainMessageSender public sender;
+//     CrossChainMessageReceiver public receiver;
+//     BurnMintERC677Helper public ccipBnMEthSepolia;
+//     // BurnMintERC677Helper public ccipBnMEthSepolia;
 
-    Register.NetworkDetails sepoliaNetworkDetails;
+//     Register.NetworkDetails sepoliaNetworkDetails;
 
-    Register.NetworkDetails arbSepoliaNetworkDetails;
+//     Register.NetworkDetails arbSepoliaNetworkDetails;
 
-    uint256 sepoliaFork;
+//     uint256 sepoliaFork;
 
-    uint256 arbSepoliaFork;
+//     uint256 arbSepoliaFork;
 
-    function setUp() public {
-        sepoliaFork = vm.createSelectFork("eth");
-        arbSepoliaFork = vm.createFork("arb");
+//     function setUp() public {
+//         sepoliaFork = vm.createSelectFork("eth");
+//         arbSepoliaFork = vm.createFork("arb");
 
-        ccipLocalSimulatorFork = new CCIPLocalSimulatorFork();
-        vm.makePersistent(address(ccipLocalSimulatorFork));
+//         ccipLocalSimulatorFork = new CCIPLocalSimulatorFork();
+//         vm.makePersistent(address(ccipLocalSimulatorFork));
 
-        sepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(
-            block.chainid
-        );
-        ccipBnMEthSepolia = BurnMintERC677Helper(
-            sepoliaNetworkDetails.ccipBnMAddress
-        );
+//         sepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(
+//             block.chainid
+//         );
+//         ccipBnMEthSepolia = BurnMintERC677Helper(
+//             sepoliaNetworkDetails.ccipBnMAddress
+//         );
 
-        sender = new CrossChainMessageSender(
-            sepoliaNetworkDetails.linkAddress,
-            sepoliaNetworkDetails.routerAddress
-        );
-        ccipBnMEthSepolia.drip(address(sender));
-        // receiver = new CrossChainMessageReceiver();
+//         sender = new CrossChainMessageSender(
+//             sepoliaNetworkDetails.linkAddress,
+//             sepoliaNetworkDetails.routerAddress
+//         );
+//         ccipBnMEthSepolia.drip(address(sender));
+//         // receiver = new CrossChainMessageReceiver();
 
-        ccipLocalSimulatorFork.requestLinkFromFaucet(address(sender), 5 ether);
+//         ccipLocalSimulatorFork.requestLinkFromFaucet(address(sender), 5 ether);
 
-        vm.selectFork(arbSepoliaFork);
+//         vm.selectFork(arbSepoliaFork);
 
-        arbSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(
-            block.chainid
-        );
+//         arbSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(
+//             block.chainid
+//         );
 
-        receiver = new CrossChainMessageReceiver(
-            arbSepoliaNetworkDetails.routerAddress
-        );
+//         receiver = new CrossChainMessageReceiver(
+//             arbSepoliaNetworkDetails.routerAddress,
+//             address(0)
+//         );
 
-        receiver.allowListedSender(address(sender), true);
-    }
+//         receiver.allowListedSender(address(sender), true);
+//     }
 
-    function testFork() public {
-        vm.selectFork(sepoliaFork);
+//     function testFork() public {
+//         vm.selectFork(sepoliaFork);
 
-        string memory someText = "hello forking";
+//         string memory someText = "hello forking";
 
-        uint256 amountToSend = 1 ether;
+//         uint256 amountToSend = 1 ether;
 
-        // sender.sendViaLink(
-        //     address(receiver),
-        //     someText,
-        //     arbSepoliaNetworkDetails.chainSelector,
-        //     sepoliaNetworkDetails.ccipBnMAddress,
-        //     amountToSend
-        // );
+//         // sender.sendViaLink(
+//         //     address(receiver),
+//         //     someText,
+//         //     arbSepoliaNetworkDetails.chainSelector,
+//         //     sepoliaNetworkDetails.ccipBnMAddress,
+//         //     amountToSend
+//         // );
 
-        uint256 fees = sender.getFee(
-            address(receiver),
-            abi.encode(someText),
-            arbSepoliaNetworkDetails.chainSelector,
-            sepoliaNetworkDetails.ccipBnMAddress,
-            0,
-            false
-        );
+//         uint256 fees = sender.getFee(
+//             address(receiver),
+//             abi.encode(someText),
+//             arbSepoliaNetworkDetails.chainSelector,
+//             sepoliaNetworkDetails.ccipBnMAddress,
+//             0,
+//             false
+//         );
 
-        vm.deal(address(sender), fees);
+//         vm.deal(address(sender), fees);
 
-        console.log("from test", sepoliaNetworkDetails.ccipBnMAddress);
+//         sender.sendViaNativeToken(
+//             address(receiver),
+//             abi.encode(someText),
+//             arbSepoliaNetworkDetails.chainSelector,
+//             sepoliaNetworkDetails.ccipBnMAddress,
+//             amountToSend
+//         );
 
-        sender.sendViaNativeToken(
-            address(receiver),
-            abi.encode(someText),
-            arbSepoliaNetworkDetails.chainSelector,
-            sepoliaNetworkDetails.ccipBnMAddress,
-            amountToSend
-        );
+//         ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
 
-        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
-
-        assertEq(amountToSend, receiver.getLastSendAmount());
-    }
-}
+//         assertEq(amountToSend, receiver.getLastSendAmount());
+//     }
+// }

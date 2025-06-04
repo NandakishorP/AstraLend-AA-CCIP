@@ -19,4 +19,20 @@ interface ILendingPoolContract {
     ) external view returns (address);
 
     function receiveTokensFromOneChainToOther(bytes memory data) external;
+
+    function updateCollateralDetailsCrossChain(
+        bytes32 requestId,
+        uint256 balance
+    ) external;
+
+    function getCrossChainMessageSenderAddress()
+        external
+        view
+        returns (address);
+
+    function getRequestCommunicationId() external pure returns (uint64);
+
+    function getActionCommunicationId() external pure returns (uint64);
+
+    function getResponseCommunicationId() external pure returns (uint64);
 }
