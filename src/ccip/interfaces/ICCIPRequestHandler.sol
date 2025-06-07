@@ -4,12 +4,19 @@ import {Client} from "@chainlink/contracts/src/v0.8/ccip/libraries/Client.sol";
 import {LendingPoolContract} from "../../LendingPoolContract.sol";
 
 interface ICCIPRequestHandler {
-    function getCollateralInformation(
-        Client.Any2EVMMessage memory message,
-        LendingPoolContract.CrossChainRequestPayLoad memory requestPayLoad
+    function updateDepositCollateralDetailsOfUser(
+        LendingPoolContract.CrossChainPayLoad memory actionPayLoad
     ) external;
 
-    function updateCollateralDetailsOfUser(
+    function updateWithdrawDepositCollateralDetailsOfUser(
         LendingPoolContract.CrossChainPayLoad memory actionPayLoad
+    ) external;
+
+    function updateStateMirror(
+        address receiver,
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint64 destinationChainSelector
     ) external;
 }

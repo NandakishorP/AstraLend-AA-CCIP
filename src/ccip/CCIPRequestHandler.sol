@@ -46,10 +46,10 @@ contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
         GSM = IGlobalStateManager(gsm);
     }
 
-    function updateCollateralDetailsOfUser(
+    function updateDepositCollateralDetailsOfUser(
         LendingPoolContract.CrossChainPayLoad memory actionPayLoad
     ) external {
-        GSM.updateCollateralDetailsOfUser(
+        GSM.updateDepositCollateralOfUser(
             actionPayLoad.chainId,
             actionPayLoad.user,
             actionPayLoad.crossChaintokenId,
@@ -57,44 +57,30 @@ contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
         );
     }
 
-    function getCollateralInformation(
-        Client.Any2EVMMessage memory message,
-        LendingPoolContract.CrossChainRequestPayLoad memory requestPayLoad
+    function updateWithdrawDepositCollateralDetailsOfUser(
+        LendingPoolContract.CrossChainPayLoad memory actionPayLoad
     ) external {
-        uint256 balance = GSM.getUserCollateralDetails(
-            requestPayLoad.chainId,
-            requestPayLoad.user,
-            requestPayLoad.crossChainTokenId
+        GSM.updateWithdrawCollateralOfUser(
+            actionPayLoad.chainId,
+            actionPayLoad.user,
+            actionPayLoad.crossChaintokenId,
+            actionPayLoad.amountToTransfer
         );
+    }
 
-        // this need to be replaced in such a way that it came from the registry
-
-        // the fees for this should be dealed in the crossChainSenderContract
-
-        address receiver = registry.getCrossChainAddress(
-            message.sourceChainSelector,
-            "crossChainMessageReceiverAddress"
-        );
-
-        crossChainMessageSender.sendViaNativeToken(
+    function updateStateMirror(
+        address receiver,
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint64 destinationChainSelector
+    ) external {
+        GSM.mirrorUpdateOfTheUserCollateral(
             receiver,
-            abi.encode(
-                ILendingPoolContract(lendingPoolContract)
-                    .getResponseCommunicationId(),
-                LendingPoolContract.CrossChainResponsePayLoad({
-                    response: LendingPoolContract
-                        .Response
-                        .RESPONSE_COLLATERAL_INFORMATION_FOR_USER,
-                    user: requestPayLoad.user,
-                    chainId: requestPayLoad.chainId,
-                    crossChainTokenId: requestPayLoad.crossChainTokenId,
-                    requestId: requestPayLoad.requestId,
-                    amount: balance
-                })
-            ),
-            message.sourceChainSelector,
-            address(0),
-            0
+            chainId,
+            user,
+            tokenId,
+            destinationChainSelector
         );
     }
 }

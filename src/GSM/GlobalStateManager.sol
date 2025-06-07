@@ -4,17 +4,30 @@ pragma solidity ^0.8.20;
 import {GlobalStateManagerErrors} from "../errors/Errors.sol";
 import {IGlobalStateManager} from "../interfaces/IGlobalStateManager.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {CollateralManager} from "./CollateralManager.sol";
+import {IRegistry} from "../interfaces/IRegistry.sol";
+import {ICrossChainMessageSender} from "../ccip/interfaces/ICrossChainMessageSender.sol";
+import {LendingPoolContract} from "../LendingPoolContract.sol";
+import {console} from "forge-std/console.sol";
 
 contract GlobalStateManager is IGlobalStateManager, Ownable {
-    mapping(uint256 chainId => mapping(address user => mapping(uint64 tokenId => uint256 amount)))
-        private s_globalCollateralDetailsForAUser;
-
-    mapping(uint256 chainId => mapping(uint64 tokenID => uint256 amount))
-        private s_totalCollateralDepositedInTheChain;
-
     mapping(address caller => bool) private s_isAllowedToCall;
+    CollateralManager collateralManager;
+    IRegistry registry;
+    ICrossChainMessageSender crossChainMessageSender;
 
-    constructor() Ownable(msg.sender) {}
+    constructor(address registry_) Ownable(msg.sender) {
+        collateralManager = new CollateralManager();
+        registry = IRegistry(registry_);
+    }
+
+    function setCrosssChainMessageSenderAddress(
+        address crossChainMessageSender_
+    ) external onlyOwner {
+        crossChainMessageSender = ICrossChainMessageSender(
+            crossChainMessageSender_
+        );
+    }
 
     // only the lending pool contract of the main chain and the cross chain senders
     // of the other chains can call this state manager contract
@@ -33,21 +46,88 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         }
     }
 
-    function updateCollateralDetailsOfUser(
+    // COLLATERAL SECTION
+
+    function updateDepositCollateralOfUser(
         uint256 chainId,
         address user,
         uint64 tokenId,
         uint256 amount
     ) external isChainRegesitedToCall {
-        s_globalCollateralDetailsForAUser[chainId][user][tokenId] += amount;
-        s_totalCollateralDepositedInTheChain[chainId][tokenId] += amount;
+        collateralManager.updateDepositCollateralDetailsOfUser(
+            chainId,
+            user,
+            tokenId,
+            amount
+        );
+    }
+
+    function updateWithdrawCollateralOfUser(
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 amount
+    ) external isChainRegesitedToCall {
+        collateralManager.updateWithdrawCollateralDetailsOfUser(
+            chainId,
+            user,
+            tokenId,
+            amount
+        );
     }
 
     function getUserCollateralDetails(
         uint256 chainId,
         address user,
         uint64 tokenId
-    ) external view isChainRegesitedToCall returns (uint256) {
-        return s_globalCollateralDetailsForAUser[chainId][user][tokenId];
+    ) public view returns (uint256) {
+        return
+            collateralManager.getUserCollateralDetails(chainId, user, tokenId);
+    }
+
+    function getTotalCollateralDetails(
+        uint256 chainId,
+        uint64 tokenId
+    ) external view returns (uint256) {
+        return
+            collateralManager.getTotalCollateralDepositedPerChainPerToken(
+                chainId,
+                tokenId
+            );
+    }
+
+    function mirrorUpdateOfTheUserCollateral(
+        address receiver,
+        uint256 chainId_,
+        address user_,
+        uint64 tokenId,
+        uint64 destinationChainSelector
+    ) external isChainRegesitedToCall {
+        uint256 userCollateralDetails = getUserCollateralDetails(
+            chainId_,
+            user_,
+            tokenId
+        );
+        bytes memory data = abi.encode(
+            uint64(1),
+            LendingPoolContract.CrossChainResponsePayLoad({
+                response: LendingPoolContract
+                    .Response
+                    .RESPONSE_COLLATERAL_INFORMATION_FOR_USER,
+                user: user_,
+                chainId: chainId_,
+                crossChainTokenId: tokenId,
+                amount: userCollateralDetails,
+                timeOfResponse: block.timestamp,
+                messageToTransfer: ""
+            })
+        );
+        crossChainMessageSender.sendViaNativeToken(
+            receiver,
+            data,
+            destinationChainSelector,
+            address(0),
+            0
+        );
     }
 }

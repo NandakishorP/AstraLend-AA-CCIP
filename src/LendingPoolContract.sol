@@ -20,9 +20,9 @@ import {CrossChainMessageReceiver} from "./ccip/CrossChainMessageReceiver.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IGlobalStateManager} from "./interfaces/IGlobalStateManager.sol";
 import {IRegistry} from "./interfaces/IRegistry.sol";
-
+import {StateAggregator} from "./StateMirror/StateAggregator.sol";
 import {CCIPRequestHandler} from "../src/ccip/CCIPRequestHandler.sol";
-import {CCIPResponseHandler} from "../src/ccip/CCIPResponseHandler.sol";
+import {CCIPReceiver} from "../src/ccip/CCIPReceiver.sol";
 
 // Layout of Contract:
 // version
@@ -191,6 +191,7 @@ contract LendingPoolContract is
 
     address private immutable i_stableCoinAddress;
     uint256 ethChainId = 11155111; // for sepolia now
+    uint256 arbChainId = 421614;
 
     ///////////////////
     // Constants
@@ -219,8 +220,7 @@ contract LendingPoolContract is
     uint256 private constant LIQUIDATION_PENALTY = 5e16; // 5% penalty on LIQUIDATION_PENALTY
 
     uint64 public constant ACTION_COMMUNICATION_ID = 0;
-    uint64 public constant REQUEST_COMMUNICATION_ID = 1;
-    uint64 public constant RESPONSE_COMMUNICATION_ID = 2;
+    uint64 public constant RESPONSE_COMMUNICATION_ID = 1;
 
     //////////////////////////
     // public state variables
@@ -248,13 +248,11 @@ contract LendingPoolContract is
 
     IGlobalStateManager GSM;
 
-    CCIPResponseHandler ccipResponseHandler;
+    CCIPReceiver ccipReceiver;
+
+    StateAggregator stateAggregator;
 
     mapping(uint64 chainId => bool isAllowed) private s_AllowedChains;
-
-    enum Request {
-        REQUEST_COLLATERAL_INFORMATION_FOR_USER
-    }
 
     enum Response {
         RESPONSE_COLLATERAL_INFORMATION_FOR_USER
@@ -262,6 +260,8 @@ contract LendingPoolContract is
 
     string private constant ETH_CONTRACT_RECEIVER_ADDRESS =
         "sepoliaReceiverAddress";
+
+    uint64 ethTokenId = 0;
 
     ////////////////////
     // Events
@@ -477,23 +477,29 @@ contract LendingPoolContract is
         crossChainMessageSender = new CrossChainMessageSender(link_, router_);
 
         linkToken = link_;
+        stateAggregator = new StateAggregator();
+
         ccipRequestHandler = new CCIPRequestHandler(
             address(this),
             registry_,
             gsm,
             address(crossChainMessageSender)
         );
-        ccipResponseHandler = new CCIPResponseHandler(
+        ccipReceiver = new CCIPReceiver(
             address(this),
             registry_,
-            address(ccipRequestHandler)
+            address(ccipRequestHandler),
+            address(stateAggregator)
         );
         crossChainMessageReceiver = new CrossChainMessageReceiver(
             router_,
-            address(ccipResponseHandler)
+            address(ccipReceiver)
         );
         if (block.chainid == ethChainId) {
             GSM = IGlobalStateManager(gsm);
+        } else {
+            stateAggregator.setAuthorizedUpdators(address(ccipReceiver), true);
+            stateAggregator.setAuthorizedReadors(address(this), true);
         }
         registry = IRegistry(registry_);
     }
@@ -533,6 +539,7 @@ contract LendingPoolContract is
      * @custom:emit LiquidityDeposited Emitted when a successful deposit occurs.
      */
 
+    //  the token id of eth is always zero
     //  a particular note change the miniting amount as per the token, if not the user can deposit on any small token and gain large amount of lptokens in return
     function depositLiquidity(
         uint64 tokenId,
@@ -551,11 +558,28 @@ contract LendingPoolContract is
         uint256 totalSupplyOfLpToken = ILpToken(lpToken).totalSupply();
         uint256 amountOfLpTokensToMint;
         if (totalSupplyOfLpToken == 0 || currentTotalLiquidity == amount) {
-            amountOfLpTokensToMint = amount;
+            if (tokenId == ethTokenId) {
+                amountOfLpTokensToMint = amount;
+            } else {
+                uint256 ethInUsd = getUsdValue(ethTokenId, 1);
+
+                uint256 arbInUsd = getUsdValue(tokenId, 1);
+                amountOfLpTokensToMint = (ethInUsd / arbInUsd) * (amount);
+            }
         } else {
-            amountOfLpTokensToMint =
-                (amount * totalSupplyOfLpToken) /
-                currentTotalLiquidity;
+            if (tokenId == ethTokenId) {
+                amountOfLpTokensToMint =
+                    (amount * totalSupplyOfLpToken) /
+                    currentTotalLiquidity;
+            } else {
+                uint256 ethInUsd = getUsdValue(ethTokenId, 1);
+
+                uint256 arbInUsd = getUsdValue(tokenId, 1);
+
+                amountOfLpTokensToMint =
+                    (ethInUsd / arbInUsd) *
+                    ((amount * totalSupplyOfLpToken) / currentTotalLiquidity);
+            }
         }
         s_depositDetailsOfUser[block.chainid][msg.sender][tokenId] += amount;
         s_liquidity[tokenId] += amount;
@@ -602,25 +626,40 @@ contract LendingPoolContract is
         isChainAllowed(uint64(block.chainid))
         nonReentrant
     {
-        uint64 destinationChainSelector = registry.getDestinationChainSelector(
-            ethChainId
-        );
+        uint64 ethDestinationChainSelector = registry
+            .getDestinationChainSelector(ethChainId);
         address tokenAddress = s_tokenAddresses[tokenId];
         vault.depositCollateral(msg.sender, tokenAddress, amount);
 
         if (ethChainId == block.chainid) {
-            GSM.updateCollateralDetailsOfUser(
+            GSM.updateDepositCollateralOfUser(
                 block.chainid,
                 msg.sender,
                 tokenId,
                 amount
             );
-        } else {
-            address receiver = registry.getAddress(
+            uint64 arbDestinationChainSelector = registry
+                .getDestinationChainSelector(arbChainId);
+            address arbCrossChainReceiverAddress = registry
+                .getCrossChainAddress(
+                    arbDestinationChainSelector,
+                    "crossChainMessageReceiverAddress"
+                );
+
+            GSM.mirrorUpdateOfTheUserCollateral(
+                arbCrossChainReceiverAddress,
                 block.chainid,
-                ETH_CONTRACT_RECEIVER_ADDRESS
+                msg.sender,
+                tokenId,
+                arbDestinationChainSelector
+            );
+        } else {
+            address receiver = registry.getCrossChainAddress(
+                ethDestinationChainSelector,
+                "crossChainMessageReceiverAddress"
             );
             bytes memory data = abi.encode(
+                ACTION_COMMUNICATION_ID,
                 CrossChainPayLoad({
                     actionType: ActionType.DEPOSIT_COLLATERAL,
                     chainId: block.chainid,
@@ -634,7 +673,7 @@ contract LendingPoolContract is
             uint256 fees = crossChainMessageSender.getFee(
                 receiver,
                 data,
-                destinationChainSelector,
+                ethDestinationChainSelector,
                 address(0),
                 amount,
                 false
@@ -656,12 +695,29 @@ contract LendingPoolContract is
                 tokenId,
                 amount,
                 receiver,
-                destinationChainSelector,
+                ethDestinationChainSelector,
                 data
             );
         }
 
         emit CollateralDeposited(msg.sender, tokenAddress, amount);
+    }
+
+    function getCollateralDetailsOfUser(
+        uint256 chainId,
+        address user,
+        uint64 tokenId
+    ) external view returns (uint256) {
+        if (block.chainid == ethChainId) {
+            return GSM.getUserCollateralDetails(chainId, user, tokenId);
+        } else {
+            return
+                stateAggregator.readCollateralDetailsOfUser(
+                    chainId,
+                    user,
+                    tokenId
+                );
+        }
     }
 
     /**
@@ -862,12 +918,11 @@ contract LendingPoolContract is
      * @param amount The amount the borrower wants to repay.
      *
      * @custom:example
-     * Suppose Alice borrowed 100 USDT using 150 USDT worth of ETH as collateral.
      * After 1 month, her total debt (due to interest) is 110 USDT.
      * - If she repays 50 USDT, 10 goes to interest, 40 reduces her principal (now 60 USDT).
      * - If she repays 110 USDT, her debt is cleared and her ETH collateral is unlocked.
      * - If she tries to repay more than 110 USDT, the function reverts (overpayment not allowed).
-     *
+     *`
      * @custom:reverts If the repayment amount exceeds the total loan amount (principal + interest).
      * @custom:security Non-reentrant and amount/token validity enforced through modifiers.
      */
@@ -1432,21 +1487,14 @@ contract LendingPoolContract is
         string messageToTransfer;
     }
 
-    struct CrossChainRequestPayLoad {
-        Request request;
-        address user;
-        uint256 chainId;
-        uint64 crossChainTokenId;
-        bytes32 requestId;
-    }
-
     struct CrossChainResponsePayLoad {
         Response response;
         address user;
         uint256 chainId;
         uint64 crossChainTokenId;
-        bytes32 requestId;
         uint256 amount;
+        uint256 timeOfResponse;
+        string messageToTransfer;
     }
 
     function transferTokensFromOneChainToOtherChain(
@@ -1588,7 +1636,7 @@ contract LendingPoolContract is
     }
 
     modifier onlyCCIPResponderCanCall() {
-        if (msg.sender != address(ccipResponseHandler)) {
+        if (msg.sender != address(ccipReceiver)) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__InvalidRequest();
         }
@@ -1701,74 +1749,6 @@ contract LendingPoolContract is
         }
     }
 
-    function getCollateralDetailsOfUser(
-        address user,
-        uint64 tokenId
-    ) external returns (uint256) {
-        uint256 lastNonce = lastNonceUsed[user][tokenId];
-        bytes32 requestId = keccak256(abi.encode(user, tokenId, lastNonce));
-        if (isCollateralDetailsAvailable[requestId]) {
-            return pendingCollateralRequest[requestId];
-        } else {
-            emit CollateralRequestStillPending();
-            return 0;
-        }
-    }
-
-    function requestCollateralDetailsOfUser(
-        address user_,
-        uint64 tokenId,
-        uint256 chainId
-    ) external {
-        uint256 nonce = block.number;
-        uint64 destinationChainSelector = registry.getDestinationChainSelector(
-            chainId
-        );
-        lastNonceUsed[user_][tokenId] = nonce;
-        bytes32 requestId_ = keccak256(abi.encode(user_, tokenId, nonce));
-
-        if (block.chainid == ethChainId) {
-            pendingCollateralRequest[requestId_] = GSM.getUserCollateralDetails(
-                block.chainid,
-                user_,
-                tokenId
-            );
-            isCollateralDetailsAvailable[requestId_] = true;
-        } else {
-            address receiver = registry.getCrossChainAddress(
-                registry.getDestinationChainSelector(chainId),
-                "crossChainMessageReceiverAddress"
-            );
-
-            bytes memory data = abi.encode(
-                REQUEST_COMMUNICATION_ID,
-                CrossChainRequestPayLoad({
-                    request: Request.REQUEST_COLLATERAL_INFORMATION_FOR_USER,
-                    user: user_,
-                    chainId: chainId,
-                    crossChainTokenId: tokenId,
-                    requestId: requestId_
-                })
-            );
-
-            crossChainMessageSender.sendViaNativeToken(
-                receiver,
-                data,
-                destinationChainSelector,
-                address(0),
-                0
-            );
-        }
-    }
-
-    function updateCollateralDetailsCrossChain(
-        bytes32 requestId,
-        uint256 balance
-    ) external onlyCCIPResponderCanCall {
-        isCollateralDetailsAvailable[requestId] = true;
-        pendingCollateralRequest[requestId] = balance;
-    }
-
     function setAllowListedSenders(
         address sender_,
         bool allowed
@@ -1778,10 +1758,6 @@ contract LendingPoolContract is
 
     function getActionCommunicationId() external pure returns (uint64) {
         return ACTION_COMMUNICATION_ID;
-    }
-
-    function getRequestCommunicationId() external pure returns (uint64) {
-        return REQUEST_COMMUNICATION_ID;
     }
 
     function getResponseCommunicationId() external pure returns (uint64) {
@@ -1803,8 +1779,8 @@ contract LendingPoolContract is
         return address(ccipRequestHandler);
     }
 
-    function getCCIPResponseHandlerAddress() external view returns (address) {
-        return address(ccipResponseHandler);
+    function getCCIPReceiverAddress() external view returns (address) {
+        return address(ccipReceiver);
     }
 
     receive() external payable {}

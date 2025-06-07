@@ -70,8 +70,10 @@ contract CrossChainLending is Test {
         InterestRateModel interestRateModelSepolia = new InterestRateModel();
         StableCoin stableCoinSepolia = new StableCoin();
         LpToken lpTokenSepolia = new LpToken();
-        GlobalStateManager GSM = new GlobalStateManager();
         Registry registrySepolia = new Registry();
+        GlobalStateManager GSM = new GlobalStateManager(
+            address(registrySepolia)
+        );
         registrySepolia.setDestinationChainSelector(
             11155111,
             16015286601757825753
@@ -93,8 +95,9 @@ contract CrossChainLending is Test {
             address(registrySepolia)
         );
 
-        // 0x938599421b0C2E1542fA17AC5c565f0fd4c71492
-        // 0x938599421b0C2E1542fA17AC5c565f0fd4c71492
+        GSM.setCrosssChainMessageSenderAddress(
+            lendingPoolContractSepolia.getCrossChainMessageSenderAddress()
+        );
 
         GSM.setAllowedChains(address(lendingPoolContractSepolia));
         GSM.setAllowedChains(
@@ -132,9 +135,15 @@ contract CrossChainLending is Test {
             ccipRequestHandlerAddress,
             true
         );
+        lendingPoolContractSepolia.setAllowedCallersFoCrossChainMessageSender(
+            address(GSM),
+            true
+        );
 
         vm.stopPrank();
 
+        wethSepolia.drip(user);
+        wethSepolia.drip(user);
         wethSepolia.drip(user);
         ccipLocalSimulatorFork.requestLinkFromFaucet(user, 5 ether);
 
@@ -234,6 +243,10 @@ contract CrossChainLending is Test {
 
         vm.stopPrank();
         wethArbSepolia.drip(user);
+        wethArbSepolia.drip(user);
+        wethArbSepolia.drip(user);
+
+        vm.deal(user, 1 ether);
 
         vm.selectFork(sepoliaFork);
 
@@ -306,25 +319,64 @@ contract CrossChainLending is Test {
 
         vm.stopPrank();
 
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        uint256 details = lendingPoolContractArbSepolia
+            .getCollateralDetailsOfUser(11155111, user, 0);
+        assertEq(details, 1 ether);
+    }
+
+    function testCollateralDespoistANdStateUpdateFromOtherChainAndCheckInMainChain()
+        public
+    {
         vm.selectFork(arbSepoliaFork);
 
+        vm.startPrank(user);
+
+        BurnMintERC677(wethArbSepolia).approve(vaultArbSepoliaAddress, 1 ether);
+        lendingPoolContractArbSepolia.depositCollateral{value: 0.5 ether}(
+            0,
+            1 ether
+        );
         vm.deal(
             lendingPoolContractArbSepolia.getCrossChainMessageSenderAddress(),
             100 ether
         );
 
-        lendingPoolContractArbSepolia.requestCollateralDetailsOfUser(
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+
+        uint256 details = lendingPoolContractSepolia.getCollateralDetailsOfUser(
+            421614,
             user,
-            0,
-            11155111
+            0
         );
+        assertEq(details, 1 ether);
+    }
+
+    function testCollateralDepositAndBalanceCheckInSubChain() public {
+        vm.selectFork(arbSepoliaFork);
+        vm.startPrank(user);
+
+        BurnMintERC677(wethArbSepolia).approve(vaultArbSepoliaAddress, 1 ether);
+        lendingPoolContractArbSepolia.depositCollateral{value: 0.5 ether}(
+            0,
+            1 ether
+        );
+        vm.deal(
+            lendingPoolContractArbSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
 
         ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
 
         ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
 
         uint256 details = lendingPoolContractArbSepolia
-            .getCollateralDetailsOfUser(user, 0);
+            .getCollateralDetailsOfUser(421614, user, 0);
         assertEq(details, 1 ether);
     }
 }

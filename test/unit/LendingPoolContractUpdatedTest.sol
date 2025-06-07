@@ -249,13 +249,13 @@ contract UpdatedTest is Test {
         ERC20Mock(weth).approve(vault, DEPOSITING_AMOUNT);
         uint256 initalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 initalDepositedCollateralByUser = lendingPoolContract
-            .getCollateralDetailsOfUser(user, 0);
+            .getCollateralDetailsOfUser(11155111, user, 0);
         uint256 initalTotalCollateralDeposited = lendingPoolContract
             .getCollateralPerToken(0);
         lendingPoolContract.depositCollateral(0, DEPOSITING_AMOUNT);
         uint256 finalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 finalDepositedCollateralByUser = lendingPoolContract
-            .getCollateralDetailsOfUser(user, 0);
+            .getCollateralDetailsOfUser(11155111, user, 0);
         uint256 finalTotalCollateralDeposited = lendingPoolContract
             .getCollateralPerToken(0);
         assertEq(initalUserBalance - finalUserBalance, DEPOSITING_AMOUNT);
@@ -308,13 +308,13 @@ contract UpdatedTest is Test {
         lendingPoolContract.depositCollateral(0, DEPOSITING_AMOUNT);
         uint256 initalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 initalDepositedCollateralByUser = lendingPoolContract
-            .getCollateralDetailsOfUser(user, 0);
+            .getCollateralDetailsOfUser(11155111, user, 0);
         uint256 initalTotalCollateralDeposited = lendingPoolContract
             .getCollateralPerToken(0);
         lendingPoolContract.withdrawCollateral(0, DEPOSITING_AMOUNT);
         uint256 finalUserBalance = ERC20Mock(weth).balanceOf(user);
         uint256 finalDepositedCollateralByUser = lendingPoolContract
-            .getCollateralDetailsOfUser(user, 0);
+            .getCollateralDetailsOfUser(11155111, user, 0);
         uint256 finalTotalCollateralDeposited = lendingPoolContract
             .getCollateralPerToken(0);
         assertEq(initalUserBalance + DEPOSITING_AMOUNT, finalUserBalance);

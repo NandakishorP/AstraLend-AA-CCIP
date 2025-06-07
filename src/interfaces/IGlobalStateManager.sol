@@ -2,11 +2,16 @@
 pragma solidity ^0.8.20;
 
 interface IGlobalStateManager {
-    enum StateUpdate {
-        DEPOSIT_COLLATERAL
-    }
+    // COLLATERAL SECTION
 
-    function updateCollateralDetailsOfUser(
+    function updateDepositCollateralOfUser(
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 amount
+    ) external;
+
+    function updateWithdrawCollateralOfUser(
         uint256 chainId,
         address user,
         uint64 tokenId,
@@ -17,5 +22,18 @@ interface IGlobalStateManager {
         uint256 chainId,
         address user,
         uint64 tokenId
-    ) external returns (uint256);
+    ) external view returns (uint256);
+
+    function getTotalCollateralDetails(
+        uint256 chainId,
+        uint64 tokenId
+    ) external view returns (uint256);
+
+    function mirrorUpdateOfTheUserCollateral(
+        address receiver,
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint64 destinationChainSelector
+    ) external;
 }

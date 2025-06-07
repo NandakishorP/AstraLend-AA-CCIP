@@ -9,7 +9,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {console} from "forge-std/console.sol";
 using SafeERC20 for IERC20;
-import {ICCIPResponseHandler} from "./interfaces/ICCIPResponseHandler.sol";
+import {ICCIPReceiver} from "./interfaces/ICCIPReceiver.sol";
 
 contract CrossChainMessageReceiver is CCIPReceiver, Ownable {
     address lendingPoolContract;
@@ -18,7 +18,7 @@ contract CrossChainMessageReceiver is CCIPReceiver, Ownable {
 
     mapping(address => bool) private allowListedSenders;
 
-    ICCIPResponseHandler ccipResponseHandler;
+    ICCIPReceiver ccipReceiver;
 
     modifier onlyAllowListedSenders(address sender) {
         if (!allowListedSenders[sender]) revert SenderNotAllowed(sender);
@@ -28,10 +28,10 @@ contract CrossChainMessageReceiver is CCIPReceiver, Ownable {
     // here we need to allow the ccip to be called and it need to be approved the ledningpool contract
     constructor(
         address router,
-        address ccipResponseHandler_
+        address ccipReceiver_
     ) CCIPReceiver(router) Ownable(msg.sender) {
         lendingPoolContract = msg.sender;
-        ccipResponseHandler = ICCIPResponseHandler(ccipResponseHandler_);
+        ccipReceiver = ICCIPReceiver(ccipReceiver_);
     }
 
     function allowListedSender(
@@ -48,6 +48,6 @@ contract CrossChainMessageReceiver is CCIPReceiver, Ownable {
         override
         onlyAllowListedSenders(abi.decode(message.sender, (address)))
     {
-        ccipResponseHandler.ccipReceiver(message);
+        ccipReceiver.ccipReceiver(message);
     }
 }

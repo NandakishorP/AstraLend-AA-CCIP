@@ -4,14 +4,16 @@ import {Client} from "@chainlink/contracts/src/v0.8/ccip/libraries/Client.sol";
 import {LendingPoolContract} from "../LendingPoolContract.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IRegistry} from "../interfaces/IRegistry.sol";
-import {ICCIPResponseHandler} from "./interfaces/ICCIPResponseHandler.sol";
+import {ICCIPReceiver} from "./interfaces/ICCIPReceiver.sol";
 import {IGlobalStateManager} from "../interfaces/IGlobalStateManager.sol";
 import {ILendingPoolContract} from "../interfaces/ILendingPoolContract.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ICCIPRequestHandler} from "./interfaces/ICCIPRequestHandler.sol";
 import {console} from "forge-std/console.sol";
+import {IStateAggregator} from "../interfaces/IStateAggregator.sol";
+import {CollateralStateMirror} from "../StateMirror/CollateralStateMirror.sol";
 
-contract CCIPResponseHandler is Ownable, ICCIPResponseHandler {
+contract CCIPReceiver is Ownable, ICCIPReceiver {
     event MessageAndTokenReceived(
         address sender,
         address token,
@@ -23,7 +25,6 @@ contract CCIPResponseHandler is Ownable, ICCIPResponseHandler {
     error InvalidChain__OnlyEthSupported();
     uint256 ethChainId = 11155111; // for sepolia now
     LendingPoolContract.CrossChainPayLoad public actionPayLoad;
-    LendingPoolContract.CrossChainRequestPayLoad public requestPayLoad;
     LendingPoolContract.CrossChainResponsePayLoad public responsePayLoad;
     address private lendingPoolContract;
     address lastToken;
@@ -31,16 +32,19 @@ contract CCIPResponseHandler is Ownable, ICCIPResponseHandler {
     IRegistry registry;
     IGlobalStateManager GSM;
     ICCIPRequestHandler ccipRequestHandler;
+    IStateAggregator stateAggregator;
 
     constructor(
         address lendingPoolContract_,
         address registry_,
-        address ccipRequestHandler_
+        address ccipRequestHandler_,
+        address stateAggregator_
     ) Ownable(msg.sender) {
         lendingPoolContract = lendingPoolContract_;
         registry = IRegistry(registry_);
 
         ccipRequestHandler = ICCIPRequestHandler(ccipRequestHandler_);
+        stateAggregator = IStateAggregator(stateAggregator_);
     }
 
     function ccipReceiver(Client.Any2EVMMessage memory message) external {
@@ -57,11 +61,6 @@ contract CCIPResponseHandler is Ownable, ICCIPResponseHandler {
                 (uint64, LendingPoolContract.CrossChainPayLoad)
             );
         } else if (id == 1) {
-            (, requestPayLoad) = abi.decode(
-                message.data,
-                (uint64, LendingPoolContract.CrossChainRequestPayLoad)
-            );
-        } else if (id == 2) {
             (, responsePayLoad) = abi.decode(
                 message.data,
                 (uint64, LendingPoolContract.CrossChainResponsePayLoad)
@@ -90,18 +89,21 @@ contract CCIPResponseHandler is Ownable, ICCIPResponseHandler {
                 actionPayLoad.actionType ==
                 LendingPoolContract.ActionType.DEPOSIT_COLLATERAL
             ) {
-                ccipRequestHandler.updateCollateralDetailsOfUser(actionPayLoad);
-                emit MessageReceivedForCollateralUpdate();
-            } else if (
-                requestPayLoad.request ==
-                LendingPoolContract
-                    .Request
-                    .REQUEST_COLLATERAL_INFORMATION_FOR_USER
-            ) {
-                ccipRequestHandler.getCollateralInformation(
-                    message,
-                    requestPayLoad
+                ccipRequestHandler.updateDepositCollateralDetailsOfUser(
+                    actionPayLoad
                 );
+                address receiver = registry.getCrossChainAddress(
+                    message.sourceChainSelector,
+                    "crossChainMessageReceiverAddress"
+                );
+                ccipRequestHandler.updateStateMirror(
+                    receiver,
+                    actionPayLoad.chainId,
+                    actionPayLoad.user,
+                    actionPayLoad.crossChaintokenId,
+                    message.sourceChainSelector
+                );
+                emit MessageReceivedForCollateralUpdate();
             }
         } else {
             if (
@@ -110,12 +112,17 @@ contract CCIPResponseHandler is Ownable, ICCIPResponseHandler {
                     .Response
                     .RESPONSE_COLLATERAL_INFORMATION_FOR_USER
             ) {
-                uint256 balance = responsePayLoad.amount;
-                ILendingPoolContract(lendingPoolContract)
-                    .updateCollateralDetailsCrossChain(
-                        responsePayLoad.requestId,
-                        balance
-                    );
+                stateAggregator.updateCollateralDetailsOfUser(
+                    responsePayLoad.chainId,
+                    responsePayLoad.user,
+                    responsePayLoad.crossChainTokenId,
+                    CollateralStateMirror.CollateralDetailsOfUser({
+                        amount: responsePayLoad.amount,
+                        lastUpdatedTime: responsePayLoad.timeOfResponse
+                    })
+                );
+            } else {
+                console.log("No information found");
             }
         }
     }
