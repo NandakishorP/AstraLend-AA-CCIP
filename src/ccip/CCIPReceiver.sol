@@ -12,6 +12,7 @@ import {ICCIPRequestHandler} from "./interfaces/ICCIPRequestHandler.sol";
 import {console} from "forge-std/console.sol";
 import {IStateAggregator} from "../interfaces/IStateAggregator.sol";
 import {CollateralStateMirror} from "../StateMirror/CollateralStateMirror.sol";
+import {LoanManager} from "../GSM/LoanManager.sol";
 
 contract CCIPReceiver is Ownable, ICCIPReceiver {
     event MessageAndTokenReceived(
@@ -49,7 +50,6 @@ contract CCIPReceiver is Ownable, ICCIPReceiver {
 
     function ccipReceiver(Client.Any2EVMMessage memory message) external {
         bytes memory rawData = message.data;
-
         uint64 id;
         assembly {
             id := mload(add(rawData, 32))
@@ -96,7 +96,7 @@ contract CCIPReceiver is Ownable, ICCIPReceiver {
                     message.sourceChainSelector,
                     "crossChainMessageReceiverAddress"
                 );
-                ccipRequestHandler.updateStateMirror(
+                ccipRequestHandler.updateCollateralStateMirror(
                     receiver,
                     actionPayLoad.chainId,
                     actionPayLoad.user,
@@ -104,6 +104,29 @@ contract CCIPReceiver is Ownable, ICCIPReceiver {
                     message.sourceChainSelector
                 );
                 emit MessageReceivedForCollateralUpdate();
+            } else if (
+                actionPayLoad.actionType ==
+                LendingPoolContract.ActionType.LOAN_TAKEN
+            ) {
+                ccipRequestHandler.updateLoanDetailsOfUser(actionPayLoad);
+                address receiver = registry.getCrossChainAddress(
+                    message.sourceChainSelector,
+                    "crossChainMessageReceiverAddress"
+                );
+
+                ccipRequestHandler.updateLoanStateMirror(
+                    receiver,
+                    actionPayLoad.chainId,
+                    actionPayLoad.user,
+                    actionPayLoad.crossChaintokenId,
+                    abi
+                        .decode(
+                            actionPayLoad.extraInformation,
+                            (LoanManager.LoanDetails)
+                        )
+                        .loanId,
+                    message.sourceChainSelector
+                );
             }
         } else {
             if (
@@ -120,6 +143,21 @@ contract CCIPReceiver is Ownable, ICCIPReceiver {
                         amount: responsePayLoad.amount,
                         lastUpdatedTime: responsePayLoad.timeOfResponse
                     })
+                );
+            } else if (
+                responsePayLoad.response ==
+                LendingPoolContract.Response.RESPONSE_LOAN_INFORMATION_FOR_USER
+            ) {
+                LoanManager.LoanDetails memory loanInfo = abi.decode(
+                    responsePayLoad.extraInformation,
+                    (LoanManager.LoanDetails)
+                );
+                stateAggregator.updateLoanDetailsOfUser(
+                    responsePayLoad.chainId,
+                    responsePayLoad.user,
+                    responsePayLoad.crossChainTokenId,
+                    loanInfo.loanId,
+                    loanInfo
                 );
             } else {
                 console.log("No information found");
@@ -147,7 +185,6 @@ contract CCIPReceiver is Ownable, ICCIPReceiver {
             } {
                 mstore(add(resultPtr, i), mload(add(dataPtr, i)))
             }
-
             mstore(0x40, add(resultPtr, and(add(len, 31), not(31))))
         }
     }

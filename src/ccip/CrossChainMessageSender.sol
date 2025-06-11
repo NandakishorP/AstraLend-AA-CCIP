@@ -10,7 +10,7 @@ import {console} from "forge-std/console.sol";
 import {ICrossChainMessageSender} from "./interfaces/ICrossChainMessageSender.sol";
 
 contract CrossChainMessageSender is Ownable {
-    event TokenSend();
+    event TokenSend(bytes32 messageId);
     error InvalidAddress();
     error InvalidSender(address);
     using SafeERC20 for IERC20;
@@ -63,7 +63,7 @@ contract CrossChainMessageSender is Ownable {
             data: _data,
             tokenAmounts: tokenAmounts,
             extraArgs: Client._argsToBytes(
-                Client.EVMExtraArgsV1({gasLimit: 500_000})
+                Client.EVMExtraArgsV1({gasLimit: 1_000_000})
             ),
             feeToken: address(0)
         });
@@ -78,7 +78,8 @@ contract CrossChainMessageSender is Ownable {
             destinationChainSelector,
             message
         );
-        emit TokenSend();
+
+        emit TokenSend(messageId);
     }
 
     function sendViaLink(
@@ -114,12 +115,11 @@ contract CrossChainMessageSender is Ownable {
 
         IERC20(link).approve(address(router), fee);
 
-        emit TokenSend();
-
         messageId = IRouterClient(router).ccipSend(
             destinationChainSelector,
             message
         );
+        emit TokenSend(messageId);
     }
 
     function getFee(

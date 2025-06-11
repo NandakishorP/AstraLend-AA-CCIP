@@ -10,6 +10,9 @@ contract CollateralManager is Ownable {
     mapping(uint256 chainId => mapping(uint64 tokenID => uint256 amount))
         private s_totalCollateralDepositedInTheChain;
 
+    mapping(uint256 chainId => mapping(address user => mapping(uint64 tokenId => uint256 amount)))
+        private s_lockedCollateralDetails;
+
     constructor() Ownable(msg.sender) {}
 
     function updateDepositCollateralDetailsOfUser(
@@ -20,6 +23,26 @@ contract CollateralManager is Ownable {
     ) external onlyOwner {
         s_globalCollateralDetailsForAUser[chainId][user][tokenId] += amount;
         s_totalCollateralDepositedInTheChain[chainId][tokenId] += amount;
+    }
+
+    function lockCollateralOfUser(
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 amount
+    ) external onlyOwner {
+        s_globalCollateralDetailsForAUser[chainId][user][tokenId] -= amount;
+        s_lockedCollateralDetails[chainId][user][tokenId] += amount;
+    }
+
+    function unlockCollateralOfUser(
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 amount
+    ) external onlyOwner {
+        s_lockedCollateralDetails[chainId][user][tokenId] -= amount;
+        s_globalCollateralDetailsForAUser[chainId][user][tokenId] += amount;
     }
 
     function updateWithdrawCollateralDetailsOfUser(

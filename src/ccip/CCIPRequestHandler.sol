@@ -12,6 +12,7 @@ import {ICrossChainMessageSender} from "./interfaces/ICrossChainMessageSender.so
 import {ICCIPRequestHandler} from "./interfaces/ICCIPRequestHandler.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {console} from "forge-std/console.sol";
+import {LoanManager} from "../GSM/LoanManager.sol";
 
 contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
     IGlobalStateManager GSM;
@@ -68,7 +69,7 @@ contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
         );
     }
 
-    function updateStateMirror(
+    function updateCollateralStateMirror(
         address receiver,
         uint256 chainId,
         address user,
@@ -80,6 +81,38 @@ contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
             chainId,
             user,
             tokenId,
+            destinationChainSelector
+        );
+    }
+
+    function updateLoanDetailsOfUser(
+        LendingPoolContract.CrossChainPayLoad memory actionPayLoad
+    ) external {
+        GSM.updateLoanDetailsOfUser(
+            actionPayLoad.chainId,
+            actionPayLoad.user,
+            actionPayLoad.crossChaintokenId,
+            abi.decode(
+                actionPayLoad.extraInformation,
+                (LoanManager.LoanDetails)
+            )
+        );
+    }
+
+    function updateLoanStateMirror(
+        address receiver,
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 loanId,
+        uint64 destinationChainSelector
+    ) external {
+        GSM.mirrorUpdateOfTheUserLoan(
+            receiver,
+            chainId,
+            user,
+            tokenId,
+            loanId,
             destinationChainSelector
         );
     }

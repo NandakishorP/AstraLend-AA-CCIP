@@ -12,11 +12,24 @@ interface ICCIPRequestHandler {
         LendingPoolContract.CrossChainPayLoad memory actionPayLoad
     ) external;
 
-    function updateStateMirror(
+    function updateLoanDetailsOfUser(
+        LendingPoolContract.CrossChainPayLoad memory actionPayLoad
+    ) external;
+
+    function updateCollateralStateMirror(
         address receiver,
         uint256 chainId,
         address user,
         uint64 tokenId,
+        uint64 destinationChainSelector
+    ) external;
+
+    function updateLoanStateMirror(
+        address receiver,
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 loanId,
         uint64 destinationChainSelector
     ) external;
 }

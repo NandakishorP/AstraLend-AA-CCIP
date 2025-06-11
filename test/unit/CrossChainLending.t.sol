@@ -12,6 +12,8 @@ import {GlobalStateManager} from "../../src/GSM/GlobalStateManager.sol";
 import {LpToken} from "../../src/tokens/LpTokenContract.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Registry} from "../../src/AdminRegistry/Registry.sol";
+import {LoanManager} from "../../src/GSM/LoanManager.sol";
+import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 
 contract CrossChainLending is Test {
     CCIPLocalSimulatorFork public ccipLocalSimulatorFork;
@@ -94,6 +96,10 @@ contract CrossChainLending is Test {
             address(GSM),
             address(registrySepolia)
         );
+        ERC20Mock(address(stableCoinSepolia)).mint(
+            lendingPoolContractSepolia.getVaultAddress(),
+            10000 ether
+        );
 
         GSM.setCrosssChainMessageSenderAddress(
             lendingPoolContractSepolia.getCrossChainMessageSenderAddress()
@@ -159,6 +165,7 @@ contract CrossChainLending is Test {
             lendingPoolContractSepolia.getCrossChainMessageSenderAddress(),
             100 ether
         );
+        vm.deal(user, 1 ether);
 
         vm.selectFork(arbSepoliaFork);
 
@@ -204,6 +211,11 @@ contract CrossChainLending is Test {
             arbSepoliaNetworkDetails.routerAddress,
             address(0),
             address(arbSepoliaRegistry)
+        );
+
+        ERC20Mock(address(stableCoinArbSepolia)).mint(
+            lendingPoolContractArbSepolia.getVaultAddress(),
+            10000 ether
         );
         lendingPoolContractArbSepolia.setallowListedSenders(senderCCIPAddress);
         interestRateModelArbSepolia.setLendingPoolContract(
@@ -364,6 +376,7 @@ contract CrossChainLending is Test {
             0,
             1 ether
         );
+
         vm.deal(
             lendingPoolContractArbSepolia.getCrossChainMessageSenderAddress(),
             100 ether
@@ -378,5 +391,117 @@ contract CrossChainLending is Test {
         uint256 details = lendingPoolContractArbSepolia
             .getCollateralDetailsOfUser(421614, user, 0);
         assertEq(details, 1 ether);
+    }
+
+    function testTakeLoan() public {
+        vm.selectFork(arbSepoliaFork);
+        vm.startPrank(user);
+
+        BurnMintERC677(wethArbSepolia).approve(vaultArbSepoliaAddress, 1 ether);
+        lendingPoolContractArbSepolia.depositCollateral{value: 0.3 ether}(
+            0,
+            1 ether
+        );
+        vm.deal(
+            lendingPoolContractArbSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+        vm.selectFork(sepoliaFork);
+
+        vm.startPrank(user);
+
+        uint256 collateralAvailableForBorrowingInUsd = lendingPoolContractSepolia
+                .getUsdValue(0, 0.7 ether);
+        lendingPoolContractSepolia.borrowLoan{value: 0.4 ether}(
+            421614,
+            0,
+            collateralAvailableForBorrowingInUsd
+        );
+
+        vm.stopPrank();
+
+        LoanManager.LoanDetails memory loanDetails = lendingPoolContractSepolia
+            .getLoanDetails(11155111, user, 0, 1);
+
+        assertEq(
+            loanDetails.amountBorrowedInUSDT,
+            collateralAvailableForBorrowingInUsd
+        );
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        LoanManager.LoanDetails
+            memory loanDetails1 = lendingPoolContractArbSepolia.getLoanDetails(
+                11155111,
+                user,
+                0,
+                1
+            );
+        assertEq(
+            loanDetails1.amountBorrowedInUSDT,
+            collateralAvailableForBorrowingInUsd
+        );
+    }
+
+    function testTakeLoanCCIPTest() public {
+        vm.selectFork(sepoliaFork);
+        vm.startPrank(user);
+
+        BurnMintERC677(wethSepolia).approve(vaultSepoliaAddress, 1 ether);
+        lendingPoolContractSepolia.depositCollateral{value: 0.3 ether}(
+            0,
+            1 ether
+        );
+        vm.deal(
+            lendingPoolContractSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(arbSepoliaFork);
+
+        vm.startPrank(user);
+
+        uint256 collateralAvailableForBorrowingInUsd = lendingPoolContractArbSepolia
+                .getUsdValue(0, 0.7 ether);
+        lendingPoolContractArbSepolia.borrowLoan{value: 0.4 ether}(
+            11155111,
+            0,
+            collateralAvailableForBorrowingInUsd
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+
+        LoanManager.LoanDetails memory loanDetails = lendingPoolContractSepolia
+            .getLoanDetails(421614, user, 0, 1);
+
+        assertEq(
+            loanDetails.amountBorrowedInUSDT,
+            collateralAvailableForBorrowingInUsd
+        );
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        LoanManager.LoanDetails
+            memory loanDetails1 = lendingPoolContractArbSepolia.getLoanDetails(
+                421614,
+                user,
+                0,
+                1
+            );
+        assertEq(
+            loanDetails1.amountBorrowedInUSDT,
+            collateralAvailableForBorrowingInUsd
+        );
     }
 }

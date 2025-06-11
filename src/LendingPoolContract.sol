@@ -23,6 +23,7 @@ import {IRegistry} from "./interfaces/IRegistry.sol";
 import {StateAggregator} from "./StateMirror/StateAggregator.sol";
 import {CCIPRequestHandler} from "../src/ccip/CCIPRequestHandler.sol";
 import {CCIPReceiver} from "../src/ccip/CCIPReceiver.sol";
+import {LoanManager} from "./GSM/LoanManager.sol";
 
 // Layout of Contract:
 // version
@@ -181,6 +182,8 @@ contract LendingPoolContract is
     /// @dev the array of borrowers
     address[] private borrowers;
 
+    bytes data1;
+
     CCIPRequestHandler ccipRequestHandler;
 
     ///////////////////////
@@ -255,7 +258,8 @@ contract LendingPoolContract is
     mapping(uint64 chainId => bool isAllowed) private s_AllowedChains;
 
     enum Response {
-        RESPONSE_COLLATERAL_INFORMATION_FOR_USER
+        RESPONSE_COLLATERAL_INFORMATION_FOR_USER,
+        RESPONSE_LOAN_INFORMATION_FOR_USER
     }
 
     string private constant ETH_CONTRACT_RECEIVER_ADDRESS =
@@ -358,7 +362,7 @@ contract LendingPoolContract is
     event LoanBorrowed(
         address indexed user,
         address indexed token,
-        LoanDetails indexed loadnDetails,
+        LoanManager.LoanDetails indexed loadnDetails,
         uint256 amount
     );
 
@@ -666,10 +670,11 @@ contract LendingPoolContract is
                     user: msg.sender,
                     crossChaintokenId: tokenId,
                     amountToTransfer: amount,
-                    messageToTransfer: ""
+                    messageToTransfer: "",
+                    extraInformation: ""
                 })
             );
-
+            data1 = data;
             uint256 fees = crossChainMessageSender.getFee(
                 receiver,
                 data,
@@ -689,15 +694,7 @@ contract LendingPoolContract is
                 revert LendingPoolContractErrors
                     .LendingPoolContract__TransferFailed();
             }
-            sendCCIPMessageForDepositCollateral(
-                block.chainid,
-                msg.sender,
-                tokenId,
-                amount,
-                receiver,
-                ethDestinationChainSelector,
-                data
-            );
+            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
         }
 
         emit CollateralDeposited(msg.sender, tokenAddress, amount);
@@ -827,14 +824,30 @@ contract LendingPoolContract is
     /// @custom:modifier isTokenApprovedByTheContract(token) Ensures that the token is allowed to be used for collateral deposit.
 
     function borrowLoan(
+        uint256 collateralChainId,
         uint64 tokenId,
         uint256 amount
-    ) external isGreaterThanZero(amount) isTokenApprovedByTheContract(tokenId) {
+    )
+        external
+        payable
+        isGreaterThanZero(amount)
+        isTokenApprovedByTheContract(tokenId)
+        isChainAllowed(uint64(block.chainid))
+        nonReentrant
+    {
         address tokenAddress = s_tokenAddresses[tokenId];
-        if (s_loanDetails[msg.sender][tokenId].amountBorrowedInUSDT > 0) {
-            revert LendingPoolContractErrors.LendingPoolContract__LoanPending();
-        }
-        uint256 depositedCollateral = s_collateralDetails[msg.sender][tokenId];
+
+        uint256 depositedCollateral = block.chainid == ethChainId
+            ? GSM.getUserCollateralDetails(
+                collateralChainId,
+                msg.sender,
+                tokenId
+            )
+            : stateAggregator.readCollateralDetailsOfUser(
+                collateralChainId,
+                msg.sender,
+                tokenId
+            );
 
         // Calculate the amount of collateral available for lending, considering the LTV ratio
         uint256 collateralAvailableForLending = (depositedCollateral * LTV) /
@@ -847,29 +860,112 @@ contract LendingPoolContract is
             revert LendingPoolContractErrors
                 .LendingPoolContract__NotEnoughCollateral();
         }
+
+        // TODO: change the arrays logic to the eth chain when the liquidation is geting handled in the state manager and just leave it for now
         if (!s_isBorrower[msg.sender][tokenId]) {
             borrowers.push(msg.sender);
             s_loanTokensForTheUser[msg.sender].push(tokenId);
             s_isBorrower[msg.sender][tokenId] = true;
         }
         totalBorrowed += amount;
+        // TODO: This need to be addressed as well
         s_amountBorrowedInToken[tokenId] += getTokenAmountFromUsd(
             tokenId,
             amount
         );
-        LoanDetails storage loan = s_loanDetails[msg.sender][tokenId];
+
+        //
+
+        uint256 loanId = block.chainid == ethChainId
+            ? GSM.readNumberOfLoanTakenPerToken(
+                block.chainid,
+                msg.sender,
+                tokenId
+            )
+            : stateAggregator.readNumberOfLoanTakenPerToken(
+                block.chainid,
+                msg.sender,
+                tokenId
+            );
+
+        LoanManager.LoanDetails memory loan;
         // Update the loan details: amount borrowed, collateral used, last update, and due date
         loan.amountBorrowedInUSDT += amount;
         loan.principalAmount += amount;
         loan.asset = tokenAddress;
+        loan.collateralChainId = collateralChainId;
         loan.collateralUsed = getTokenAmountFromUsd(tokenId, amount);
         loan.lastUpdate = block.timestamp;
         loan.dueDate = block.timestamp + 180 days;
         loan.token = i_stableCoinAddress;
         loan.userBorrowIndex = s_borrowerIndex[tokenId];
-        //updating the other params
-        s_collateralDetails[msg.sender][tokenId] -= depositedCollateral;
-        s_lockedCollateralDetails[msg.sender][tokenId] += depositedCollateral;
+
+        loan.loanId = ++loanId;
+
+        if (block.chainid == ethChainId) {
+            GSM.updateLoanDetailsOfUser(
+                block.chainid,
+                msg.sender,
+                tokenId,
+                loan
+            );
+            uint64 arbDestinationChainSelector = registry
+                .getDestinationChainSelector(arbChainId);
+            address arbCrossChainReceiverAddress = registry
+                .getCrossChainAddress(
+                    arbDestinationChainSelector,
+                    "crossChainMessageReceiverAddress"
+                );
+            GSM.mirrorUpdateOfTheUserLoan(
+                arbCrossChainReceiverAddress,
+                block.chainid,
+                msg.sender,
+                tokenId,
+                loan.loanId,
+                arbDestinationChainSelector
+            );
+        } else {
+            uint64 ethDestinationChainSelector = registry
+                .getDestinationChainSelector(ethChainId);
+            address receiver = registry.getCrossChainAddress(
+                ethDestinationChainSelector,
+                "crossChainMessageReceiverAddress"
+            );
+            bytes memory extraInf = abi.encode(loan);
+            bytes memory data = abi.encode(
+                ACTION_COMMUNICATION_ID,
+                CrossChainPayLoad({
+                    actionType: ActionType.LOAN_TAKEN,
+                    chainId: block.chainid,
+                    user: msg.sender,
+                    crossChaintokenId: tokenId,
+                    amountToTransfer: 0,
+                    messageToTransfer: "",
+                    extraInformation: extraInf
+                })
+            );
+            uint256 fees = crossChainMessageSender.getFee(
+                receiver,
+                data,
+                ethDestinationChainSelector,
+                address(0),
+                amount,
+                false
+            );
+            console.log(fees, "fees");
+            if (msg.value < fees) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__InsufficentFees();
+            }
+            (bool success, ) = payable(crossChainMessageSender).call{
+                value: fees
+            }("");
+            if (!success) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__TransferFailed();
+            }
+            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
+        }
         _accuredInterest(tokenId); //this accuredInterest will update the global value for the borrowerIndex for the particular token everytime a user takes loan from the contract
         vault.transferLoanAmount(msg.sender, amount);
         emit LoanBorrowed(msg.sender, tokenAddress, loan, amount);
@@ -1190,6 +1286,7 @@ contract LendingPoolContract is
             revert LendingPoolContractErrors
                 .LendingPoolContract__LoanStillPending();
         }
+
         s_amountBorrowedInToken[tokenId] -= loan.collateralUsed;
         s_lockedCollateralDetails[user][tokenId] -= loan.collateralUsed;
         s_collateralDetails[user][tokenId] += loan.collateralUsed;
@@ -1445,10 +1542,20 @@ contract LendingPoolContract is
      */
 
     function getLoanDetails(
+        uint256 chainId,
         address user,
-        uint64 tokenId
-    ) public view returns (LoanDetails memory) {
-        return s_loanDetails[user][tokenId];
+        uint64 tokenId,
+        uint256 loanId
+    ) public view returns (LoanManager.LoanDetails memory) {
+        return
+            block.chainid == ethChainId
+                ? GSM.readLoanDetailsOfUser(chainId, user, tokenId, loanId)
+                : stateAggregator.readLoanDetailsOfUser(
+                    chainId,
+                    user,
+                    tokenId,
+                    loanId
+                );
     }
 
     function getPriceFeedAddress(uint64 tokenId) public view returns (address) {
@@ -1475,7 +1582,7 @@ contract LendingPoolContract is
         TRANSFER,
         DEPOSIT,
         DEPOSIT_COLLATERAL,
-        GET_COLLATERAL_DETAILS
+        LOAN_TAKEN
     }
 
     struct CrossChainPayLoad {
@@ -1485,6 +1592,7 @@ contract LendingPoolContract is
         uint64 crossChaintokenId;
         uint256 amountToTransfer;
         string messageToTransfer;
+        bytes extraInformation;
     }
 
     struct CrossChainResponsePayLoad {
@@ -1495,6 +1603,7 @@ contract LendingPoolContract is
         uint256 amount;
         uint256 timeOfResponse;
         string messageToTransfer;
+        bytes extraInformation;
     }
 
     function transferTokensFromOneChainToOtherChain(
@@ -1526,7 +1635,8 @@ contract LendingPoolContract is
                 user: msg.sender,
                 crossChaintokenId: tokenId,
                 amountToTransfer: amount,
-                messageToTransfer: message
+                messageToTransfer: message,
+                extraInformation: ""
             })
         );
         address tokenAddress = s_tokenAddresses[tokenId];
@@ -1622,7 +1732,8 @@ contract LendingPoolContract is
                 user: msg.sender,
                 crossChaintokenId: tokenId,
                 amountToTransfer: amount,
-                messageToTransfer: message
+                messageToTransfer: message,
+                extraInformation: ""
             })
         );
         fees = crossChainMessageSender.getFee(
@@ -1718,10 +1829,7 @@ contract LendingPoolContract is
     // FOR THE REPAYING AND THE LIQUIDATION WILL BE FOLLOWED AFTER THIS, THE COLLATERAL CANNOT BE TRANSFERED CROSS CHAIN
     // THE COLLATERAL CAN ONLY BE RELEASED TO WHATEVER THE CHAIN THE COLLATERAL DEPOSITED, NOT TO ANY OTHER CHAIN
 
-    function sendCCIPMessageForDepositCollateral(
-        uint256 chainId_,
-        address user_,
-        uint64 tokenId,
+    function sendCCIPMessage(
         uint256 amount,
         address receiver,
         uint64 destinationChainSelector,
@@ -1732,13 +1840,6 @@ contract LendingPoolContract is
             data,
             destinationChainSelector,
             address(0),
-            amount
-        );
-        emit DepositCollateralInitiated(
-            user_,
-            chainId_,
-            tokenId,
-            destinationChainSelector,
             amount
         );
     }
