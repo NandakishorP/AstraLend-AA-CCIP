@@ -1657,34 +1657,97 @@ contract LendingPoolContract is
     // CCIP
     ///////////////////
 
+    /// @notice Enum representing the type of cross-chain action being performed.
     enum ActionType {
+        /// @dev A simple token transfer across chains.
         TRANSFER,
+        /// @dev A liquidity deposit operation from one chain to another.
         DEPOSIT,
+        /// @dev A collateral deposit for lending/borrowing purposes across chains.
         DEPOSIT_COLLATERAL,
+        /// @dev An indication that a loan has been taken on a different chain.
         LOAN_TAKEN
     }
 
     struct CrossChainPayLoad {
-        ActionType actionType;
-        uint256 chainId;
-        address user;
-        uint64 crossChaintokenId;
-        uint256 amountToTransfer;
-        string messageToTransfer;
-        bytes extraInformation;
+        ActionType actionType; // ───────────────────────────────╮ Type of cross-chain operation (e.g., DEPOSIT, LOAN_TAKEN)
+        uint256 chainId; //                                      │ Chain ID where the action originates
+        address user; //                                         │ Address of the user initiating the action
+        uint64 crossChaintokenId; //                             │ Token identifier on the destination chain
+        uint256 amountToTransfer; //                             │ Amount involved in the action (e.g., collateral or loan)
+        string messageToTransfer; //                             │ Optional human-readable message or memo
+        bytes extraInformation; // ──────────────────────────────╯ Additional data payload (flexible)
     }
 
     struct CrossChainResponsePayLoad {
-        Response response;
-        address user;
-        uint256 chainId;
-        uint64 crossChainTokenId;
-        uint256 amount;
-        uint256 timeOfResponse;
-        string messageToTransfer;
-        bytes extraInformation;
+        Response response; // ───────────────────────────────╮ Response type identifier (e.g., SUCCESS, ERROR)
+        address user; //                                     │ Address of the user the response is for
+        uint256 chainId; //                                  │ Originating chain ID of the request
+        uint64 crossChainTokenId; //                         │ Token ID used in the cross-chain context
+        uint256 amount; //                                   │ Amount processed or returned in the response
+        uint256 timeOfResponse; //                           │ Timestamp of when the response was generated
+        string messageToTransfer; //                         │ Optional descriptive message returned
+        bytes extraInformation; // ──────────────────────────╯ Any additional data sent back (metadata, logs, etc.)
     }
 
+    /**
+     * @notice Initiates a cross-chain token transfer from the current chain to a specified destination chain.
+     *
+     * @dev
+     * This function supports two modes of fee payment:
+     * - Using LINK tokens
+     * - Using the native token of the current chain (e.g., ETH)
+     *
+     * It checks for:
+     * - Approved token ID
+     * - Positive transfer amount
+     * - Sufficient user balance
+     * - Appropriate fee payment depending on the mode
+     * - Secure transfer via non-reentrancy
+     *
+     * The transfer payload is encoded into a `CrossChainPayLoad` struct and passed to the `crossChainMessageSender`
+     * to relay the transfer request. The amount is deducted from the sender's balance, and tokens are moved to
+     * the custody of the `crossChainMessageSender` for forwarding.
+     *
+     * @param receiver The recipient address on the destination chain.
+     * @param destinationChainSelector The unique chain selector for the target chain (as used in CCIP).
+     * @param tokenId The internal identifier of the token being transferred (mapped to ERC20 address).
+     * @param amount The amount of tokens to be transferred.
+     * @param isLink Indicates whether LINK tokens will be used to pay the cross-chain fee.
+     * @param message Optional string message to be transferred along with the transaction.
+     *
+     * @custom:example
+     * Suppose a user wants to transfer 100 USDC (tokenId: 2) from Ethereum (chainId: 1) to Polygon (chainSelector: 137):
+     *
+     * ```
+     * transferTokensFromOneChainToOtherChain(
+     *     0xAbcD...Ef12, // receiver on Polygon
+     *     137,           // destinationChainSelector for Polygon
+     *     2,             // tokenId mapped to USDC
+     *     100e6,         // 100 USDC in smallest unit (6 decimals)
+     *     true,          // Use LINK tokens for fee payment
+     *     "Sending funds to my Polygon wallet"
+     * );
+     * ```
+     *
+     * The function:
+     * - Encodes a `CrossChainPayLoad` with type `TRANSFER`
+     * - Calculates the LINK fee
+     * - Transfers the LINK fee and token amount to the cross-chain sender
+     * - Emits a `TokenTransferInitiated` event
+     *
+     * @custom:security
+     * - The function is protected against reentrancy via `nonReentrant`.
+     * - Ensures sender has enough balance.
+     * - Validates the fee sufficiency before attempting transfer.
+     * - Only tokens approved by the contract are allowed via modifier.
+     *
+     * @custom:error LendingPoolContract__InsufficentBalance If the sender does not have enough balance to transfer.
+     * @custom:error LendingPoolContract__InsufficentFees If the user sends less native token than required for the fee.
+     * @custom:error LendingPoolContract__TransferFailed If the native token fee transfer fails.
+     *
+     * @custom:events Emits `TokenTransferInitiated` when the transfer is successfully initiated.
+     */
     function transferTokensFromOneChainToOtherChain(
         address receiver,
         uint64 destinationChainSelector,
@@ -1796,6 +1859,48 @@ contract LendingPoolContract is
         );
     }
 
+    /**
+     * @notice Estimates the cross-chain transfer fee for a given token, destination chain, and transfer method.
+     *
+     * @dev
+     * This function creates a `CrossChainPayLoad` struct with type `TRANSFER` and encodes it.
+     * It then queries the `crossChainMessageSender` to compute the required fee based on:
+     * - The payload size
+     * - Token address
+     * - Amount being transferred
+     * - Destination chain
+     * - Whether LINK or native token is used for the fee
+     *
+     * The function does not perform any state changes and is view-only.
+     *
+     * @param receiver The destination address on the target chain.
+     * @param tokenId The internal identifier for the token to be transferred.
+     * @param amount The amount of tokens to be transferred.
+     * @param isLink Whether LINK tokens will be used to pay the fee (true) or native token (false).
+     * @param destinationChainSelector The selector ID for the target chain (e.g., 137 for Polygon).
+     * @param message Optional message to be included in the payload.
+     *
+     * @return fees The estimated cross-chain transfer fee in the specified fee payment mode.
+     *
+     * @custom:example
+     * To estimate the fee for transferring 50 USDT (tokenId: 3) from Ethereum to Arbitrum:
+     *
+     * ```
+     * uint256 fee = getFee(
+     *     0xA1b2...C3d4, // Receiver on Arbitrum
+     *     3,            // USDT token ID
+     *     50e6,         // 50 USDT (6 decimals)
+     *     true,         // Using LINK tokens
+     *     42161,        // Arbitrum's chain selector
+     *     "Transfering funds to Arbitrum"
+     * );
+     * ```
+     *
+     * @custom:notes
+     * - The fee estimation depends on the payload size, destination chain gas costs, and token volatility.
+     * - Always call this function before initiating a cross-chain transfer to avoid underpayment errors.
+     */
+
     function getFee(
         address receiver,
         uint64 tokenId,
@@ -1832,6 +1937,52 @@ contract LendingPoolContract is
         }
         _;
     }
+
+    /**
+     * @notice Finalizes a cross-chain token transfer by receiving tokens sent from another chain.
+     *
+     * @dev
+     * This function is triggered by a designated CCIP responder contract once a cross-chain
+     * message is received. It performs the following:
+     * - Decodes the payload (`CrossChainPayLoad`) received from the source chain.
+     * - Verifies if the token is allowed for deposit.
+     * - Transfers the tokens from the `crossChainMessageReceiver` contract to the protocol's vault.
+     * - Updates the internal user deposit state on this chain.
+     * - Emits a `TokensReceivedFromCrossChain` event.
+     *
+     * Requirements:
+     * - Caller must be authorized via the `onlyCCIPResponderCanCall` modifier.
+     * - Token must be approved (exist in `s_tokenAddresses` mapping).
+     * - Vault and token transfers must succeed.
+     *
+     * @param data Encoded `CrossChainPayLoad` structure received from the source chain.
+     * Should include:
+     * - `user`: The address receiving the tokens.
+     * - `crossChaintokenId`: The token identifier used in this protocol.
+     * - `amountToTransfer`: Amount of tokens to credit to the user's balance.
+     *
+     * @custom:example
+     * If a user on Ethereum sends 100 USDC to themselves on Polygon, the payload decoded will look like:
+     * ```
+     * CrossChainPayLoad({
+     *     actionType: ActionType.TRANSFER,
+     *     chainId: 1,                          // Ethereum
+     *     user: 0x1234...abcd,                // User's wallet
+     *     crossChaintokenId: 2,              // USDC token ID
+     *     amountToTransfer: 100e6,           // 100 USDC (6 decimals)
+     *     messageToTransfer: "Transfer",
+     *     extraInformation: ""
+     * });
+     * ```
+     * The vault will receive 100 USDC, and the user's deposit on Polygon will be increased accordingly.
+     *
+     * @custom:events
+     * Emits {TokensReceivedFromCrossChain} on successful execution.
+     *
+     * @custom:security
+     * - This function is protected by `nonReentrant` to prevent reentrancy exploits.
+     * - Only callable by pre-authorized CCIP responder contract(s).
+     */
 
     function receiveTokensFromOneChainToOther(
         bytes memory data
@@ -1908,6 +2059,39 @@ contract LendingPoolContract is
     // FOR THE REPAYING AND THE LIQUIDATION WILL BE FOLLOWED AFTER THIS, THE COLLATERAL CANNOT BE TRANSFERED CROSS CHAIN
     // THE COLLATERAL CAN ONLY BE RELEASED TO WHATEVER THE CHAIN THE COLLATERAL DEPOSITED, NOT TO ANY OTHER CHAIN
 
+    /**
+     * @notice Sends a CCIP (Cross-Chain Interoperability Protocol) message using native token for gas fees.
+     *
+     * @dev
+     * This function initiates a cross-chain message transfer using the `sendViaNativeToken` method
+     * of the `crossChainMessageSender`. It uses the native token (e.g., ETH, MATIC) on the source chain
+     * to pay for the gas on the destination chain. The token address is passed as `address(0)` since
+     * no ERC20 token is being transferred as part of the message — only the payload and native fee.
+     *
+     * Requirements:
+     * - The caller must ensure the required fee (in native tokens) is already handled outside this function.
+     * - The `crossChainMessageSender` must be a trusted and initialized contract that handles CCIP logic.
+     *
+     * @param amount The amount of native token to be sent to the destination chain (used for token transfer or just gas).
+     * @param receiver The address that will receive the message and tokens on the destination chain.
+     * @param destinationChainSelector The CCIP chain selector ID representing the destination chain.
+     * @param data The ABI-encoded payload to be sent to the destination chain.
+     *
+     * @custom:example
+     * To send a payload to a user on Avalanche:
+     * ```
+     * sendCCIPMessage(
+     *     1 ether,
+     *     0xRecipientOnAvalanche,
+     *     0xa86a, // Avalanche chain selector
+     *     abi.encode(payload)
+     * );
+     * ```
+     *
+     * @custom:note
+     * - This is a private utility function intended to abstract out repeated CCIP logic.
+     * - If tokens are being transferred along with data, consider using the token address instead of `address(0)`.
+     */
     function sendCCIPMessage(
         uint256 amount,
         address receiver,

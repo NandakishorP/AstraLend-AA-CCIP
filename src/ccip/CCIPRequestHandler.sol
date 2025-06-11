@@ -29,6 +29,7 @@ contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
 
     /// @notice Interface to the LendingPoolContract for interacting with lending and borrowing functionalities.
     ILendingPoolContract lendingPoolContract;
+
     error OnlyOwnerCanCall();
     error InvalidChain__OnlyEthSupported();
 

@@ -34,13 +34,16 @@ import {LoanStateMirror} from "./LoanStateMirror.sol";
  * - Called by CCIP handlers or cross-chain systems to synchronize state.
  * - Called by trusted contracts (e.g., frontend relay readers or verification contracts) to fetch mirrored data.
  */
+
 contract StateAggregator is Ownable {
     error StateAggregator__InvalidSender();
 
     CollateralStateMirror collateralStateMirror;
+
     LoanStateMirror loanStateMirror;
 
     mapping(address => bool) private s_isAuthorizedToUpdate;
+
     mapping(address => bool) private s_isAuthorizedToRead;
 
     modifier onlyCCIPHandlersCanCall() {
@@ -120,6 +123,7 @@ contract StateAggregator is Ownable {
             loanId,
             loanDetails
         );
+
         loanStateMirror.updateNumberOfLoansTaken(
             chainId,
             user,
