@@ -15,11 +15,19 @@ import {console} from "forge-std/console.sol";
 import {LoanManager} from "../GSM/LoanManager.sol";
 
 contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
+    /// @notice Interface to manage and update global state (like loan or collateral states) across chains.
     IGlobalStateManager GSM;
+
+    /// @notice Interface to access the registry for retrieving cross-chain contract addresses by name and chain ID.
     IRegistry registry;
+
+    /// @notice Chain ID representing Ethereum Sepolia testnet. Used to determine if execution context is on Sepolia.
     uint256 ethChainId = 11155111; // for sepolia now
 
+    /// @notice Interface to send messages to other chains via a cross-chain messaging protocol (e.g., CCIP).
     ICrossChainMessageSender crossChainMessageSender;
+
+    /// @notice Interface to the LendingPoolContract for interacting with lending and borrowing functionalities.
     ILendingPoolContract lendingPoolContract;
     error OnlyOwnerCanCall();
     error InvalidChain__OnlyEthSupported();

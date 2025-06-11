@@ -8,6 +8,24 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+/**
+ * @title Vault
+ * @notice Manages the custody and movement of tokens for the lending protocol.
+ * @dev Only callable by the LendingPool contract. Handles collateral, deposits, loan disbursals, and repayments.
+ *
+ * Functions:
+ * - depositLiquidity: Accepts liquidity deposits from users into the protocol.
+ * - depositCollateral: Accepts collateral tokens from users.
+ * - withdrawDeposit: Allows users to withdraw their deposited liquidity.
+ * - transferLoanAmount: Sends loan amounts (stablecoin) to users when loans are approved.
+ * - claimLoan: Receives loan repayment amounts from users.
+ * - transferCollateral: Returns collateral to users (e.g., after repayment or liquidation).
+ * - transferToken: Generic token transfer function used internally.
+ *
+ * @custom:security Only callable by the LendingPool contract.
+ * @custom:note Uses OpenZeppelin's SafeERC20 for secure token transfers.
+ * @custom:error VaultErrors for paused state and unauthorized access.
+ */
 contract Vault is ReentrancyGuard, Ownable {
     ILendingPoolContract private lendingPoolContract;
     using SafeERC20 for IERC20;

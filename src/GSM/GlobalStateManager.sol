@@ -12,10 +12,19 @@ import {LendingPoolContract} from "../LendingPoolContract.sol";
 import {console} from "forge-std/console.sol";
 
 contract GlobalStateManager is IGlobalStateManager, Ownable {
+    /// @dev Tracks whether a specific address is allowed to call restricted functions.
     mapping(address caller => bool) private s_isAllowedToCall;
+
+    /// @notice Contract responsible for managing user collateral across chains.
     CollateralManager collateralManager;
+
+    /// @notice Contract responsible for managing loan creation, repayment, and state.
     LoanManager loanManager;
+
+    /// @notice Registry contract used for fetching global system configuration and references.
     IRegistry registry;
+
+    /// @notice Interface for sending cross-chain messages to other blockchain networks.
     ICrossChainMessageSender crossChainMessageSender;
 
     constructor(address registry_) Ownable(msg.sender) {
@@ -99,6 +108,14 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
             );
     }
 
+    /// @notice Sends a mirrored update of a user’s collateral information to a contract on another chain.
+    /// @dev This function is used to synchronize collateral data across chains via a cross-chain message using native tokens.
+    /// @param receiver The address on the destination chain that will receive and process the collateral update.
+    /// @param chainId_ The ID of the chain where the original collateral data is stored.
+    /// @param user_ The address of the user whose collateral data is being mirrored.
+    /// @param tokenId The ID of the collateral token whose data is being transferred.
+    /// @param destinationChainSelector The selector (Chainlink CCIP identifier) for the destination chain.
+
     function mirrorUpdateOfTheUserCollateral(
         address receiver,
         uint256 chainId_,
@@ -106,13 +123,15 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         uint64 tokenId,
         uint64 destinationChainSelector
     ) external isChainRegesitedToCall {
+        // Fetch the user's collateral amount for the given chain and token.
         uint256 userCollateralDetails = getUserCollateralDetails(
             chainId_,
             user_,
             tokenId
         );
+        // Prepare the encoded message payload for cross-chain delivery.
         bytes memory data = abi.encode(
-            uint64(1),
+            uint64(1), // Identifier for response payload
             LendingPoolContract.CrossChainResponsePayLoad({
                 response: LendingPoolContract
                     .Response
@@ -126,11 +145,13 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
                 extraInformation: ""
             })
         );
+
+        // Send the payload to the receiver contract on the destination chain using native token mode.
         crossChainMessageSender.sendViaNativeToken(
             receiver,
             data,
             destinationChainSelector,
-            address(0),
+            address(0), // No token attached in this message
             0
         );
     }

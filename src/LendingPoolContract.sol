@@ -237,41 +237,54 @@ contract LendingPoolContract is
 
     uint256 public totalBorrowed;
 
+    /// @notice Address of the interest rate model contract
     address public interestRateModelAddress;
 
+    /// @notice Vault interface for asset management
     IVault vault;
 
+    /// @notice Contract responsible for sending cross-chain messages
     CrossChainMessageSender crossChainMessageSender;
 
+    /// @notice Contract responsible for receiving cross-chain messages
     CrossChainMessageReceiver crossChainMessageReceiver;
 
+    /// @notice Address of the LINK token used for CCIP
     address linkToken;
 
+    /// @notice Registry interface for managing protocol data
     IRegistry registry;
 
+    /// @notice Interface to access global state variables
     IGlobalStateManager GSM;
 
+    /// @notice CCIP receiver interface for handling incoming messages
     CCIPReceiver ccipReceiver;
 
+    /// @notice Aggregator for collecting and managing protocol state data
     StateAggregator stateAggregator;
 
+    /// @notice Mapping to track if a given chainId is allowed for cross-chain communication
     mapping(uint64 chainId => bool isAllowed) private s_AllowedChains;
 
+    /// @notice Enum representing types of responses for user requests
     enum Response {
+        /// @dev Response containing user's collateral information
         RESPONSE_COLLATERAL_INFORMATION_FOR_USER,
+        /// @dev Response containing user's loan information
         RESPONSE_LOAN_INFORMATION_FOR_USER
     }
 
+    /// @notice Constant string storing the receiver address for Ethereum Sepolia network
     string private constant ETH_CONTRACT_RECEIVER_ADDRESS =
         "sepoliaReceiverAddress";
 
+    /// @notice Token ID used to represent Ethereum in cross-chain context
     uint64 ethTokenId = 0;
 
     ////////////////////
     // Events
     ////////////////////
-
-    event CollateralRequestStillPending();
 
     /// @notice Emitted when a borrower repays their loan.
     /// @param user The address of the borrower.
@@ -435,13 +448,22 @@ contract LendingPoolContract is
     ////////////////////
     // Constructor
     ////////////////////
-    /// @dev   this params that are passed through the contract are immutable
-    /// @param tokenAddresses this is the token addresses that are recognized by the contract
-    /// @param priceFeedAddresses this is the pricefeed addreses of the corresponding token addressses
-    /// @param stableCoinAddress this is the stable coin address which is used in lending pegged against the us doller
-    ///         meaning 1 stable coin == 1 $
-    /// @param lpTokenAddress this is the addrsss of the lp token that is used to reward the users that provide the contract with the liquidity
-    /// Note that the constructor throws an error if the length of the pricefeed address array is not equal to the token addresses array
+
+    /// @dev Initializes the LendingPool contract with required configuration parameters. All parameters are immutable post-deployment.
+    /// @param tokenAddresses The list of ERC20 token addresses recognized by the contract for lending/borrowing.
+    /// @param priceFeedAddresses The corresponding Chainlink price feed addresses for each token in `tokenAddresses`.
+    /// @param chainIds The list of chain IDs that are allowed for cross-chain operations via CCIP.
+    /// @param stableCoinAddress The address of the stablecoin used in the protocol, pegged to 1 USD (1 token = 1 USD).
+    /// @param lpTokenAddress The address of the LP token contract used to reward liquidity providers.
+    /// @param interestRateModelAddress_ The address of the interest rate model used for borrow rate calculations.
+    /// @param link_ The address of the LINK token used for CCIP message fee payments.
+    /// @param router_ The address of the CCIP router contract for sending and receiving messages.
+    /// @param gsm The address of the Global State Manager, used on Ethereum mainnet for accessing cross-chain global state.
+    /// @param registry_ The address of the CCIP Registry contract used by the request handler and receiver.
+    /// @notice The constructor reverts if the lengths of `tokenAddresses` and `priceFeedAddresses` arrays do not match.
+    /// @notice Initializes internal mappings and components, including the Vault, CrossChainMessageSender/Receiver, CCIPReceiver, StateAggregator, and CCIPRequestHandler.
+    /// @notice Conditionally registers the Global State Manager or sets up state access depending on the chain being Ethereum or not.
+
     constructor(
         address[] memory tokenAddresses,
         address[] memory priceFeedAddresses,
@@ -598,26 +620,51 @@ contract LendingPoolContract is
 
     // DEPOSITING THE COLLATERAL FUNCTION
 
-    /// @dev Allows a user to deposit collateral in the form of an ERC20 token into the contract.
-    /// This function performs checks to ensure the amount is greater than zero and that the token is
-    /// allowed for collateral deposits. The deposited amount is updated in both the user's collateral
-    /// details and the total collateral for the token. Additionally, the token is safely transferred from
-    /// the user's address to the contract address.
-    ///
-    /// @param tokenId The tokenId of the ERC20 token that the user is depositing as collateral.
-    /// @param amount The amount of the ERC20 token that the user wishes to deposit as collateral.
-    ///
-    /// @notice This function emits a `CollateralDeposited` event once the deposit is successfully made.
-    /// The event contains the user's address, the token address, and the amount deposited.
-    ///
-    /// @dev The following conditions are verified before processing the deposit:
-    /// - The deposit amount must be greater than zero, enforced by the `isGreaterThanZero(amount)` modifier.
-    /// - The token being deposited must be one that is allowed for collateral, enforced by the `isTokenApprovedByTheContract(token)` modifier.
-    /// - The function is protected against reentrancy attacks by the `nonReentrant` modifier.
-    ///
-    /// @custom:security non-reentrant Ensures that the function cannot be called recursively.
-    /// @custom:modifier isGreaterThanZero(amount) Validates that the deposit amount is greater than zero.
-    /// @custom:modifier isTokenApprovedByTheContract(token) Ensures that the specified token is allowed for collateral deposit.
+    /**
+     * @notice Allows a user to deposit a specified amount of an ERC20 token as collateral.
+     * @dev
+     * This function:
+     * - Verifies that the deposit amount is greater than zero.
+     * - Ensures the specified token is allowed by the contract for collateral.
+     * - Confirms that the call is coming from an allowed chain.
+     * - Safely transfers the token from the user to the Vault contract.
+     *
+     * On Ethereum mainnet:
+     * - Updates the Global State Manager (GSM) with the user's updated collateral amount.
+     * - Mirrors the user's collateral update to a remote chain (e.g., Arbitrum) via the GSM using the registry.
+     *
+     * On other chains:
+     * - Encodes a cross-chain message payload using CCIP to notify the Ethereum mainnet about the deposit.
+     * - Calculates the required fee for sending the CCIP message.
+     * - Reverts if the sent `msg.value` is less than the required CCIP fee.
+     * - Sends the CCIP message using the `sendCCIPMessage()` function to synchronize state on Ethereum.
+     *
+     * Emits a `CollateralDeposited` event on successful deposit.
+     *
+     * @param tokenId The internal token ID that represents the ERC20 token being deposited.
+     * @param amount The amount of the token to be deposited by the user as collateral.
+     *
+     * @notice This function will fail if:
+     * - The `amount` is zero or less.
+     * - The `tokenId` does not correspond to an approved token.
+     * - The chain calling the function is not registered as allowed.
+     * - There are insufficient CCIP fees provided in `msg.value` (for non-Ethereum chains).
+     * - The transfer of native fees to the `crossChainMessageSender` fails.
+     *
+     * @notice The function is chain-aware:
+     * - On Ethereum: performs direct GSM updates and mirrors them to the remote chain (e.g., Arbitrum).
+     * - On other chains: sends CCIP message to Ethereum to update global state.
+     *
+     * @custom:modifiers
+     * - `isGreaterThanZero(amount)`: Ensures the amount is greater than zero.
+     * - `isTokenApprovedByTheContract(tokenId)`: Validates the token is whitelisted.
+     * - `isChainAllowed(block.chainid)`: Verifies the current chain is permitted for interaction.
+     * - `nonReentrant`: Prevents reentrancy attacks.
+     *
+     * @custom:security non-reentrant Ensures the function cannot be re-entered during execution.
+     *
+     * emit: CollateralDeposited Emitted after a successful deposit with the user's address, token address, and amount.
+     */
 
     function depositCollateral(
         uint64 tokenId,
@@ -699,6 +746,15 @@ contract LendingPoolContract is
 
         emit CollateralDeposited(msg.sender, tokenAddress, amount);
     }
+
+    /**
+     * @notice Retrieves the collateral amount a user has deposited for a specific token on a given chain.
+     * @param chainId The chain ID where the collateral was deposited.
+     * @param user The address of the user whose collateral details are being queried.
+     * @param tokenId The ID of the token for which collateral information is requested.
+     * @return The amount of collateral the user has deposited for the specified token.
+     * @dev Uses GSM on Ethereum mainnet and StateAggregator on other chains.
+     */
 
     function getCollateralDetailsOfUser(
         uint256 chainId,
@@ -788,40 +844,63 @@ contract LendingPoolContract is
         emit LpTokensBurned(msg.sender, amount);
     }
 
-    /// @dev Allows a user to borrow a loan using their deposited collateral.
-    /// This function performs several checks before proceeding with the loan:
-    /// 1. Verifies that the requested loan amount is greater than zero.
-    /// 2. Ensures that the token used for the loan is allowed for collateral deposit.
-    /// 3. Checks if there is already an active loan for the user with the same token.
-    /// 4. Validates whether the user has enough collateral to borrow the requested amount.
-    /// 5. Updates the user's loan details, collateral balance, and transfers the loan amount to the user.
-    ///
-    /// The collateral available for lending is determined by the Loan-to-Value (LTV) ratio and is converted to USD
-    /// for comparison to the loan amount. If the loan request exceeds the available collateral value, the function reverts.
-    ///
-    /// The _accuredInterest function will periodically update the global borrowerIndex for a specific token everytime some user takes the loan
-    /// from the protocol, this way the protocol opitmizes the gas cost by checking it for every user and updating it
-    /// If the loan is successfully granted:
-    /// - Updates the user's loan details (amount borrowed, collateral used, due date, etc.).
-    /// - Moves the collateral from the user's available collateral to their locked collateral balance.
-    /// - Emits a `LoanBorrowed` event.
-    ///
-    /// @param token The address of the ERC20 token used as collateral for the loan.
-    /// @param amount The amount of the loan in USD value that the user wants to borrow.
-    ///
-    /// @notice This function emits a `LoanBorrowed` event upon successful loan issuance, which records the user's
-    /// address, the token used for collateral, the loan details, and the amount borrowed.
-    ///
-    /// @dev The following checks and operations are performed:
-    /// - The amount must be greater than zero (checked via the `isGreaterThanZero` modifier).
-    /// - The token must be allowed for collateral (checked via the `isTokenApprovedByTheContract` modifier).
-    /// - The user's previous loan must be cleared, or else the request will be rejected.
-    /// - The function ensures that the user has enough collateral to borrow the requested amount based on the LTV ratio.
-    /// - Updates the loan details, including collateral used and due date. The collateral is moved from the available to locked balance.
-    /// - The loan amount is transferred to the user in the form of a stablecoin.
-
-    /// @custom:modifier isGreaterThanZero(amount) Ensures that the loan amount is greater than zero.
-    /// @custom:modifier isTokenApprovedByTheContract(token) Ensures that the token is allowed to be used for collateral deposit.
+    /**
+     * @notice Allows a user to borrow a loan against their deposited collateral.
+     *
+     * This function lets users borrow a specified USD-denominated amount, backed by their previously deposited ERC20
+     * collateral. It validates the borrower's collateral against a pre-defined Loan-to-Value (LTV) ratio to ensure
+     * safe lending practices and mitigates risks for the protocol.
+     *
+     * The function supports cross-chain state updates using CCIP (Cross-Chain Interoperability Protocol). On non-Ethereum
+     * chains, it encodes loan information and forwards it to a receiver contract on Ethereum for state synchronization.
+     * On Ethereum, it updates the Global State Manager directly and optionally mirrors the loan state to Arbitrum.
+     *
+     * ### Example Usage:
+     * - User has deposited 1 ETH as collateral on Ethereum.
+     * - Let's assume ETH is worth $3,000 and the LTV is 75%.
+     * - The maximum loan amount the user can borrow is $2,250.
+     * - The user calls `borrowLoan(1, tokenIdOfETH, 2000)` to borrow $2,000 in stablecoin.
+     *
+     * @param collateralChainId The chain ID where the user has deposited their collateral.
+     * @param tokenId The ID of the ERC20 token used as collateral.
+     * @param amount The amount (in USD) the user wants to borrow.
+     *
+     * return Emits a `LoanBorrowed` event upon successful loan issuance, which includes:
+     *         - The user's address
+     *         - The token used as collateral
+     *         - Loan details (including amount, duration, loan ID, etc.)
+     *         - The borrowed amount in USD
+     *
+     * @dev Preconditions and internal process:
+     * - Checks if the borrowing `amount` is greater than zero using the `isGreaterThanZero` modifier.
+     * - Verifies that the `tokenId` is supported for borrowing using the `isTokenApprovedByTheContract` modifier.
+     * - Ensures that the collateral is sufficient using the LTV formula:
+     *       collateralAvailable = (collateralDeposited * LTV) / PRECISION
+     *   and converts it to USD for comparison.
+     * - Maintains a borrower record and associates the loan to the user.
+     * - Generates and stores a `LoanDetails` struct for the loan with unique loan ID.
+     * - On Ethereum:
+     *     - Directly updates the `GlobalStateManager (GSM)`.
+     *     - Sends a mirrored update to Arbitrum using the `registry`.
+     * - On other chains:
+     *     - Encodes loan data and sends it to the Ethereum chain via `crossChainMessageSender` using CCIP.
+     * - Transfers the loan amount in stablecoin to the user from the internal vault.
+     * - Updates the global borrower index for interest tracking using `_accuredInterest`.
+     *
+     * @custom:modifier isGreaterThanZero(amount) Ensures the loan amount requested is greater than zero.
+     * @custom:modifier isTokenApprovedByTheContract(tokenId) Ensures the token is supported for borrowing.
+     * @custom:modifier isChainAllowed(chainId) Confirms the current chain is supported by the protocol.
+     * @custom:security non-reentrant Prevents reentrancy attacks.
+     *
+     * @notice The function requires the sender to pay a fee when sending cross-chain updates. If insufficient fees are sent, the transaction reverts.
+     * @notice On Ethereum, loans are recorded via `GSM`. On other chains, loans are forwarded to Ethereum using CCIP for state synchronization.
+     * @notice Loans are due in 180 days from the time of borrowing and tracked via `LoanDetails.dueDate`.
+     *
+     * @dev Reverts with:
+     * - `LendingPoolContract__NotEnoughCollateral` if the collateral is insufficient for the requested loan.
+     * - `LendingPoolContract__InsufficentFees` if the provided fee is less than the calculated cross-chain message cost.
+     * - `LendingPoolContract__TransferFailed` if the fee payment fails during cross-chain message dispatch.
+     */
 
     function borrowLoan(
         uint256 collateralChainId,

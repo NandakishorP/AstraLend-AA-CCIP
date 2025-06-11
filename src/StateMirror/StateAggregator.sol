@@ -7,6 +7,33 @@ import {console} from "forge-std/console.sol";
 import {LoanManager} from "../GSM/LoanManager.sol";
 import {LoanStateMirror} from "./LoanStateMirror.sol";
 
+/**
+ * @title StateAggregator
+ * @author Nandakishor
+ * @notice Aggregates and synchronizes user collateral and loan states across chains.
+ * @dev This contract acts as a bridge to update and read off-chain-synced data related to user collateral and loan positions.
+ *      It maintains secure, permissioned access using `onlyOwner`, `onlyCCIPHandlersCanCall`, and `onlyAuthorizedReadersCanCall`.
+ *
+ * Functional Overview:
+ * - **Collateral Management**:
+ *      - Updates and reads user collateral information from remote chains via the `CollateralStateMirror`.
+ * - **Loan Management**:
+ *      - Updates and reads loan data for users across chains via the `LoanStateMirror`.
+ *      - Manages borrow status, loan count, and full loan struct details.
+ *
+ * Access Control:
+ * - `onlyOwner`: Used to configure authorized updaters and readers.
+ * - `onlyCCIPHandlersCanCall`: Restricts write operations to designated CCIP bridge/message handler addresses.
+ * - `onlyAuthorizedReadersCanCall`: Restricts read operations to whitelisted consumer contracts.
+ *
+ * Security:
+ * - Only the contract deployer (owner) can assign reader/updater permissions.
+ * - State is stored in separate mirror contracts to isolate logic and storage.
+ *
+ * Intended Use:
+ * - Called by CCIP handlers or cross-chain systems to synchronize state.
+ * - Called by trusted contracts (e.g., frontend relay readers or verification contracts) to fetch mirrored data.
+ */
 contract StateAggregator is Ownable {
     error StateAggregator__InvalidSender();
 
