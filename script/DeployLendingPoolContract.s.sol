@@ -40,13 +40,15 @@ contract DeployLendingPoolContract is Script {
             arr,
             address(stableCoin),
             address(lpToken),
-            address(interestRateModel),
             address(0),
             address(0),
             address(0),
             address(0)
         );
-        interestRateModel.setLendingPoolContract(address(lendingPoolcontract));
+        interestRateModel.setLendingPoolContractAndGSM(
+            address(lendingPoolcontract),
+            address(0)
+        );
         interestRateModel.transferOwnership(address(lendingPoolcontract));
         stableCoin.transferOwnership(address(lendingPoolcontract));
         lpToken.transferOwnership(address(lendingPoolcontract));

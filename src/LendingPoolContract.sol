@@ -8,8 +8,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ILpToken} from "./interfaces/ILpToken.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AggregatorV3Interface} from "../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
-import {IInterestRateModel} from "../src/interfaces/IInterestRateModel.sol";
 import {ILendingPoolContract} from "../src/interfaces/ILendingPoolContract.sol";
 import {LendingPoolContractErrors} from "./errors/Errors.sol";
 import {console} from "forge-std/console.sol";
@@ -58,12 +56,7 @@ import {LoanManager} from "./GSM/LoanManager.sol";
 
     gethealthfactor
 */
-contract LendingPoolContract is
-    ReentrancyGuard,
-    AutomationCompatibleInterface,
-    ILendingPoolContract,
-    Ownable
-{
+contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
     ////////////////////
     // Using directives
     ////////////////////
@@ -90,15 +83,6 @@ contract LendingPoolContract is
         uint8 penaltyCount; // ───────────────────────────────╮ Penalty count  after due date (limit is 2)
         bool isLiquidated; // ────────────────────────────────╯ True if the loan has been liquidated due to default
     }
-
-    /// @notice Tracks the index representing the total interest factor for each token across all borrowers.
-    /// @dev This index is used to calculate the compounded interest for each borrower of a specific token.
-    /// Each time interest is accrued, this index is updated to reflect the cumulative interest growth.
-    /// The individual borrower's interest can be calculated using the difference between the current index
-    /// and the index at the time of borrowing.
-
-    mapping(uint64 tokenId => uint256 borrowerIndexOfToken)
-        public s_borrowerIndex;
 
     /// @notice Records the last timestamp when interest was accrued for each token.
     /// @dev This is used to determine how much time has passed since the last interest update for a specific token,
@@ -154,20 +138,11 @@ contract LendingPoolContract is
     mapping(address user => mapping(uint64 tokenId => uint256 amount))
         private s_lockedCollateralDetails;
 
-    /// @dev checking whether the user has any active loans
-
-    mapping(address user => mapping(uint64 tokenId => bool))
-        private s_isBorrower;
-
     /// @notice Tracks the total amount borrowed for each token across all users.
     /// @dev Maps a token address to the cumulative borrowed amount in that token.
 
     mapping(uint64 tokenId => uint256 amountBorrowed)
         private s_amountBorrowedInToken;
-    /// @notice Stores the list of tokens for which a user has active loans.
-    /// @dev Maps a user address to an array of token addresses they have borrowed against.
-
-    mapping(address user => uint64[] tokens) private s_loanTokensForTheUser;
 
     // mapping the tokenId to the tokenAddress
 
@@ -178,11 +153,6 @@ contract LendingPoolContract is
         private pendingCollateralRequest;
     mapping(bytes32 requestId => bool) private isCollateralDetailsAvailable;
     mapping(address => mapping(uint64 => uint256)) public lastNonceUsed;
-
-    /// @dev the array of borrowers
-    address[] private borrowers;
-
-    bytes data1;
 
     CCIPRequestHandler ccipRequestHandler;
 
@@ -205,11 +175,6 @@ contract LendingPoolContract is
 
     uint256 private constant ADDITIONAL_PRICEFEED_PRECISION = 1e10;
 
-    /// @dev The precision factor used for calculations involving token amounts or decimals
-    /// @notice This constant defines the precision (1e18) for scaling values to match token precision or to avoid precision loss
-
-    uint256 private constant PRECISION = 1e18;
-
     /// @dev The Loan-to-Value (LTV) ratio used in the system
     /// @notice This constant defines the LTV ratio as 75%, represented with 18 decimal places (75e16)
 
@@ -220,7 +185,10 @@ contract LendingPoolContract is
 
     uint256 private constant LIQUIDATION_THRESHOLD = 80e16;
 
-    uint256 private constant LIQUIDATION_PENALTY = 5e16; // 5% penalty on LIQUIDATION_PENALTY
+    /// @dev The precision factor used for calculations involving token amounts or decimals
+    /// @notice This constant defines the precision (1e18) for scaling values to match token precision or to avoid precision loss
+
+    uint256 private constant PRECISION = 1e18;
 
     uint64 public constant ACTION_COMMUNICATION_ID = 0;
     uint64 public constant RESPONSE_COMMUNICATION_ID = 1;
@@ -238,7 +206,6 @@ contract LendingPoolContract is
     uint256 public totalBorrowed;
 
     /// @notice Address of the interest rate model contract
-    address public interestRateModelAddress;
 
     /// @notice Vault interface for asset management
     IVault vault;
@@ -272,7 +239,10 @@ contract LendingPoolContract is
         /// @dev Response containing user's collateral information
         RESPONSE_COLLATERAL_INFORMATION_FOR_USER,
         /// @dev Response containing user's loan information
-        RESPONSE_LOAN_INFORMATION_FOR_USER
+        RESPONSE_LOAN_INFORMATION_FOR_USER,
+        RESPONSE_DEPOSIT_INFORMATION_FOR_USER,
+        RESPONSE_LPTOKEN_UPDATE,
+        RESPONSE_SET_INITAL_PARAMS
     }
 
     /// @notice Constant string storing the receiver address for Ethereum Sepolia network
@@ -385,21 +355,6 @@ contract LendingPoolContract is
 
     event LpTokensBurned(address indexed user, uint256 amount);
 
-    /// @notice Emitted when a user's loan is liquidated due to insufficient collateral.
-    /// @param user The address of the user whose loan was liquidated.
-    /// @param token The address of the token associated with the loan.
-    /// @param loanAmount The total outstanding loan amount at the time of liquidation.
-    /// @param collateralValue The USD value of the user's collateral.
-    /// @param liquidationPenalty The penalty amount applied during liquidation.
-
-    event LoanLiquidated(
-        address indexed user,
-        address indexed token,
-        uint256 loanAmount,
-        uint256 collateralValue,
-        uint256 liquidationPenalty
-    );
-
     event TokenTransferInitiated(
         address indexed user,
         uint64 tokenId,
@@ -455,7 +410,6 @@ contract LendingPoolContract is
     /// @param chainIds The list of chain IDs that are allowed for cross-chain operations via CCIP.
     /// @param stableCoinAddress The address of the stablecoin used in the protocol, pegged to 1 USD (1 token = 1 USD).
     /// @param lpTokenAddress The address of the LP token contract used to reward liquidity providers.
-    /// @param interestRateModelAddress_ The address of the interest rate model used for borrow rate calculations.
     /// @param link_ The address of the LINK token used for CCIP message fee payments.
     /// @param router_ The address of the CCIP router contract for sending and receiving messages.
     /// @param gsm The address of the Global State Manager, used on Ethereum mainnet for accessing cross-chain global state.
@@ -470,7 +424,6 @@ contract LendingPoolContract is
         uint64[] memory chainIds,
         address stableCoinAddress,
         address lpTokenAddress,
-        address interestRateModelAddress_,
         address link_,
         address router_,
         address gsm,
@@ -484,7 +437,6 @@ contract LendingPoolContract is
                 );
         }
         for (uint256 i = 0; i < tokenAddresses.length; i++) {
-            s_borrowerIndex[uint64(i)] = 1e18;
             s_lastAccuralTime[uint64(i)] = block.timestamp;
             s_priceFeed[uint64(i)] = priceFeedAddresses[i];
             s_tokenAddressesList.push(tokenAddresses[i]);
@@ -495,7 +447,6 @@ contract LendingPoolContract is
         for (uint i = 0; i < chainIds.length; i++) {
             s_AllowedChains[chainIds[i]] = true;
         }
-        interestRateModelAddress = interestRateModelAddress_;
 
         i_stableCoinAddress = stableCoinAddress;
         lpToken = lpTokenAddress;
@@ -579,9 +530,22 @@ contract LendingPoolContract is
     {
         //safeTraansfer function is used instead of the normal transfer,it ensures that the user has approved necessery funds for the contract
         address tokenAddress = s_tokenAddresses[tokenId];
+        uint64 ethDestinationChainSelector = registry
+            .getDestinationChainSelector(ethChainId);
         vault.depositLiquidity(msg.sender, tokenAddress, amount);
-        uint256 currentTotalLiquidity = s_liquidity[tokenId];
-        uint256 totalSupplyOfLpToken = ILpToken(lpToken).totalSupply();
+        uint256 currentTotalLiquidity;
+        uint256 totalSupplyOfLpToken;
+
+        if (block.chainid == ethChainId) {
+            currentTotalLiquidity = GSM.readTotalLiquidityPerToken(tokenId);
+            totalSupplyOfLpToken = GSM.getTotalLpTokensInCirculation();
+        } else {
+            currentTotalLiquidity = stateAggregator.readTotalLiquidityPerToken(
+                tokenId
+            );
+            totalSupplyOfLpToken = stateAggregator
+                .getTotalLpTokensInCirculation();
+        }
         uint256 amountOfLpTokensToMint;
         if (totalSupplyOfLpToken == 0 || currentTotalLiquidity == amount) {
             if (tokenId == ethTokenId) {
@@ -607,9 +571,72 @@ contract LendingPoolContract is
                     ((amount * totalSupplyOfLpToken) / currentTotalLiquidity);
             }
         }
-        s_depositDetailsOfUser[block.chainid][msg.sender][tokenId] += amount;
-        s_liquidity[tokenId] += amount;
         _mintLpTokens(msg.sender, amountOfLpTokensToMint);
+        if (block.chainid == ethChainId) {
+            GSM.updateDepositDetailsOfUser(
+                block.chainid,
+                msg.sender,
+                tokenId,
+                amount
+            );
+            GSM.updateLPTokenInCirculation(
+                block.chainid,
+                msg.sender,
+                amountOfLpTokensToMint
+            );
+            uint64 arbDestinationChainSelector = registry
+                .getDestinationChainSelector(arbChainId);
+            address arbCrossChainReceiverAddress = registry
+                .getCrossChainAddress(
+                    arbDestinationChainSelector,
+                    "crossChainMessageReceiverAddress"
+                );
+
+            GSM.mirrorUpdateOfTheUserDeposit(
+                arbCrossChainReceiverAddress,
+                block.chainid,
+                msg.sender,
+                tokenId,
+                arbDestinationChainSelector
+            );
+        } else {
+            address receiver = registry.getCrossChainAddress(
+                ethDestinationChainSelector,
+                "crossChainMessageReceiverAddress"
+            );
+            bytes memory data = abi.encode(
+                ACTION_COMMUNICATION_ID,
+                CrossChainPayLoad({
+                    actionType: ActionType.DEPOSIT_LIQUIDITY,
+                    chainId: block.chainid,
+                    user: msg.sender,
+                    crossChaintokenId: tokenId,
+                    amountToTransfer: amount,
+                    messageToTransfer: "",
+                    extraInformation: abi.encode(amountOfLpTokensToMint)
+                })
+            );
+            uint256 fees = crossChainMessageSender.getFee(
+                receiver,
+                data,
+                ethDestinationChainSelector,
+                address(0),
+                0,
+                false
+            );
+            if (msg.value < fees) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__InsufficentFees();
+            }
+            (bool success, ) = payable(crossChainMessageSender).call{
+                value: fees
+            }("");
+            if (!success) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__TransferFailed();
+            }
+            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
+        }
         emit LiquidityDeposited(
             msg.sender,
             tokenAddress,
@@ -721,13 +748,12 @@ contract LendingPoolContract is
                     extraInformation: ""
                 })
             );
-            data1 = data;
             uint256 fees = crossChainMessageSender.getFee(
                 receiver,
                 data,
                 ethDestinationChainSelector,
                 address(0),
-                amount,
+                0,
                 false
             );
             if (msg.value < fees) {
@@ -797,24 +823,91 @@ contract LendingPoolContract is
      */
 
     function withdrawDeposit(
+        uint256 chainId,
         uint64 tokenId,
         uint256 amount
     )
         external
+        payable
         isGreaterThanZero(amount)
         isTokenApprovedByTheContract(tokenId)
         nonReentrant
     {
         address tokenAddress = s_tokenAddresses[tokenId];
-        uint256 depositAmount = s_depositDetailsOfUser[block.chainid][
-            msg.sender
-        ][tokenId];
+        uint256 depositAmount = block.chainid == ethChainId
+            ? GSM.readDepositDetailsOfUser(chainId, msg.sender, tokenId)
+            : stateAggregator.readDepositDetailsOfUser(
+                chainId,
+                msg.sender,
+                tokenId
+            );
         if (depositAmount < amount) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__InsufficentBalance(amount, depositAmount);
         }
-        s_depositDetailsOfUser[block.chainid][msg.sender][tokenId] -= amount;
-        s_liquidity[tokenId] -= amount;
+        uint256 balanceAmount = depositAmount - amount;
+        if (block.chainid == ethChainId) {
+            GSM.updateWithDrawDetailsOfUser(
+                chainId,
+                msg.sender,
+                tokenId,
+                balanceAmount
+            );
+            uint64 arbDestinationChainSelector = registry
+                .getDestinationChainSelector(arbChainId);
+            address arbCrossChainReceiverAddress = registry
+                .getCrossChainAddress(
+                    arbDestinationChainSelector,
+                    "crossChainMessageReceiverAddress"
+                );
+
+            GSM.mirrorUpdateOfTheUserDeposit(
+                arbCrossChainReceiverAddress,
+                block.chainid,
+                msg.sender,
+                tokenId,
+                arbDestinationChainSelector
+            );
+        } else {
+            uint64 ethDestinationChainSelector = registry
+                .getDestinationChainSelector(ethChainId);
+            address receiver = registry.getCrossChainAddress(
+                ethDestinationChainSelector,
+                "crossChainMessageReceiverAddress"
+            );
+            bytes memory data = abi.encode(
+                ACTION_COMMUNICATION_ID,
+                CrossChainPayLoad({
+                    actionType: ActionType.WITHDRAW_LIQUIDITY,
+                    chainId: block.chainid,
+                    user: msg.sender,
+                    crossChaintokenId: tokenId,
+                    amountToTransfer: amount,
+                    messageToTransfer: "",
+                    extraInformation: ""
+                })
+            );
+            uint256 fees = crossChainMessageSender.getFee(
+                receiver,
+                data,
+                ethDestinationChainSelector,
+                address(0),
+                0,
+                false
+            );
+            if (msg.value < fees) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__InsufficentFees();
+            }
+            (bool success, ) = payable(crossChainMessageSender).call{
+                value: fees
+            }("");
+            if (!success) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__TransferFailed();
+            }
+            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
+        }
         vault.withdrawDeposit(msg.sender, tokenAddress, amount);
         emit DepositWithdrawn(msg.sender, tokenAddress, amount);
     }
@@ -916,7 +1009,9 @@ contract LendingPoolContract is
     {
         address tokenAddress = s_tokenAddresses[tokenId];
 
-        uint256 depositedCollateral = block.chainid == ethChainId
+        bool chainIdentifier = block.chainid == ethChainId;
+
+        uint256 depositedCollateral = chainIdentifier
             ? GSM.getUserCollateralDetails(
                 collateralChainId,
                 msg.sender,
@@ -939,13 +1034,7 @@ contract LendingPoolContract is
             revert LendingPoolContractErrors
                 .LendingPoolContract__NotEnoughCollateral();
         }
-
         // TODO: change the arrays logic to the eth chain when the liquidation is geting handled in the state manager and just leave it for now
-        if (!s_isBorrower[msg.sender][tokenId]) {
-            borrowers.push(msg.sender);
-            s_loanTokensForTheUser[msg.sender].push(tokenId);
-            s_isBorrower[msg.sender][tokenId] = true;
-        }
         totalBorrowed += amount;
         // TODO: This need to be addressed as well
         s_amountBorrowedInToken[tokenId] += getTokenAmountFromUsd(
@@ -953,9 +1042,7 @@ contract LendingPoolContract is
             amount
         );
 
-        //
-
-        uint256 loanId = block.chainid == ethChainId
+        uint256 loanId = chainIdentifier
             ? GSM.readNumberOfLoanTakenPerToken(
                 block.chainid,
                 msg.sender,
@@ -977,12 +1064,13 @@ contract LendingPoolContract is
         loan.lastUpdate = block.timestamp;
         loan.dueDate = block.timestamp + 180 days;
         loan.token = i_stableCoinAddress;
-        loan.userBorrowIndex = s_borrowerIndex[tokenId];
-
+        loan.userBorrowIndex = chainIdentifier
+            ? GSM.getBorrowerIndex(tokenId)
+            : stateAggregator.getBorrowerIndex(tokenId);
         loan.loanId = ++loanId;
 
-        if (block.chainid == ethChainId) {
-            GSM.updateLoanDetailsOfUser(
+        if (chainIdentifier) {
+            GSM.updateBorrowLoanDetailsOfUser(
                 block.chainid,
                 msg.sender,
                 tokenId,
@@ -1006,10 +1094,16 @@ contract LendingPoolContract is
         } else {
             uint64 ethDestinationChainSelector = registry
                 .getDestinationChainSelector(ethChainId);
+            console.log(
+                "eth desselector from repayLoan",
+                ethDestinationChainSelector
+            );
             address receiver = registry.getCrossChainAddress(
                 ethDestinationChainSelector,
                 "crossChainMessageReceiverAddress"
             );
+            console.log("address cross chain from repayLoan", receiver);
+
             bytes memory extraInf = abi.encode(loan);
             bytes memory data = abi.encode(
                 ACTION_COMMUNICATION_ID,
@@ -1028,10 +1122,9 @@ contract LendingPoolContract is
                 data,
                 ethDestinationChainSelector,
                 address(0),
-                amount,
+                0,
                 false
             );
-            console.log(fees, "fees");
             if (msg.value < fees) {
                 revert LendingPoolContractErrors
                     .LendingPoolContract__InsufficentFees();
@@ -1045,7 +1138,6 @@ contract LendingPoolContract is
             }
             sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
         }
-        _accuredInterest(tokenId); //this accuredInterest will update the global value for the borrowerIndex for the particular token everytime a user takes loan from the contract
         vault.transferLoanAmount(msg.sender, amount);
         emit LoanBorrowed(msg.sender, tokenAddress, loan, amount);
     }
@@ -1103,20 +1195,41 @@ contract LendingPoolContract is
      */
 
     function repayLoan(
+        uint256 loanChainId,
         uint64 tokenId,
-        uint256 amount
+        uint256 amount,
+        uint256 loanId
     )
         external
+        payable
         isTokenApprovedByTheContract(tokenId)
         isGreaterThanZero(amount)
         nonReentrant
     {
         address tokenAddress = s_tokenAddresses[tokenId];
-        LoanDetails storage loan = s_loanDetails[msg.sender][tokenId];
+
+        bool chainIdentififer = block.chainid == ethChainId;
+        LoanManager.LoanDetails memory loan = chainIdentififer
+            ? GSM.readLoanDetailsOfUser(
+                loanChainId,
+                msg.sender,
+                tokenId,
+                loanId
+            )
+            : stateAggregator.readLoanDetailsOfUser(
+                loanChainId,
+                msg.sender,
+                tokenId,
+                loanId
+            );
         uint256 principalLoanAmount = loan.amountBorrowedInUSDT;
         uint256 userBorrowIndex = loan.userBorrowIndex;
         uint256 scaledLoanAmount = (principalLoanAmount *
-            s_borrowerIndex[tokenId]) / userBorrowIndex;
+            (
+                chainIdentififer
+                    ? GSM.getBorrowerIndex(tokenId)
+                    : stateAggregator.getBorrowerIndex(tokenId)
+            )) / userBorrowIndex;
         uint256 interestAccrued = scaledLoanAmount - principalLoanAmount;
         uint256 interestPaidNow = 0;
         uint256 principalRepaid = 0;
@@ -1143,15 +1256,86 @@ contract LendingPoolContract is
 
         loan.amountBorrowedInUSDT = scaledLoanAmount;
         loan.interestPaid += interestPaidNow;
-        totalBorrowed -= principalRepaid;
-        _accuredInterest(tokenId);
-
-        if (loan.amountBorrowedInUSDT == 0) {
-            _releaseCollateral(msg.sender, tokenId);
-            emit CollateralReleased(msg.sender, tokenAddress, amount);
-        } else {
+        // modify this part to update the collateral of the user in the gsm and arrange it to release the collateral from the chain
+        if (loan.amountBorrowedInUSDT != 0) {
             loan.lastUpdate = block.timestamp;
-            loan.userBorrowIndex = s_borrowerIndex[tokenId];
+            loan.userBorrowIndex = (
+                chainIdentififer
+                    ? GSM.getBorrowerIndex(tokenId)
+                    : stateAggregator.getBorrowerIndex(tokenId)
+            );
+        } else {
+            loan.isClosed = true;
+        }
+        if (chainIdentififer) {
+            GSM.repayLoanDetailsOfUser(loanChainId, msg.sender, tokenId, loan);
+            uint64 destinationChainSelector = registry
+                .getDestinationChainSelector(421614);
+
+            address receiver = registry.getCrossChainAddress(
+                destinationChainSelector,
+                "crossChainMessageReceiverAddress"
+            );
+
+            GSM.mirrorUpdateOfTheUserLoan(
+                receiver,
+                loanChainId,
+                msg.sender,
+                tokenId,
+                loan.loanId,
+                destinationChainSelector
+            );
+        } else {
+            uint64 ethDestinationChainSelector = registry
+                .getDestinationChainSelector(ethChainId);
+
+            address receiver = registry.getCrossChainAddress(
+                ethDestinationChainSelector,
+                "crossChainMessageReceiverAddress"
+            );
+            bytes memory extraInf = abi.encode(loan);
+            bytes memory data = abi.encode(
+                ACTION_COMMUNICATION_ID,
+                CrossChainPayLoad({
+                    actionType: ActionType.LOAN_REPAYMENT,
+                    chainId: block.chainid,
+                    user: msg.sender,
+                    crossChaintokenId: tokenId,
+                    amountToTransfer: 0,
+                    messageToTransfer: "",
+                    extraInformation: extraInf
+                })
+            );
+            uint256 fees;
+            try
+                crossChainMessageSender.getFee(
+                    receiver,
+                    data,
+                    ethDestinationChainSelector,
+                    address(0),
+                    0,
+                    false
+                )
+            returns (uint256 fees_) {
+                fees = fees_;
+            } catch Error(string memory reason) {
+                revert(string(abi.encodePacked("getFee failed: ", reason)));
+            } catch {
+                revert("getFee failed: unknown reason");
+            }
+
+            if (msg.value < fees) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__InsufficentFees();
+            }
+            (bool success, ) = payable(crossChainMessageSender).call{
+                value: fees
+            }("");
+            if (!success) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__TransferFailed();
+            }
+            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
         }
         emit LoanRepaid(
             msg.sender,
@@ -1176,16 +1360,87 @@ contract LendingPoolContract is
         uint256 amount
     )
         external
+        payable
         isTokenApprovedByTheContract(tokenId)
         isGreaterThanZero(amount)
         nonReentrant
     {
-        if (s_collateralDetails[msg.sender][tokenId] < amount) {
+        bool chainIdentifier = block.chainid == ethChainId;
+        uint256 collateralAmount = chainIdentifier
+            ? GSM.getUserCollateralDetails(block.chainid, msg.sender, tokenId)
+            : stateAggregator.readCollateralDetailsOfUser(
+                block.chainid,
+                msg.sender,
+                tokenId
+            );
+        if (collateralAmount < amount) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__InvalidRequestAmount();
         }
-        s_collateralDetails[msg.sender][tokenId] -= amount;
-        s_tokenCollateral[tokenId] -= amount;
+        // s_collateralDetails[msg.sender][tokenId] -= amount;
+        // s_tokenCollateral[tokenId] -= amount;
+        if (chainIdentifier) {
+            GSM.updateWithdrawCollateralOfUser(
+                block.chainid,
+                msg.sender,
+                tokenId,
+                amount
+            );
+            uint64 arbDestinationChainSelector = registry
+                .getDestinationChainSelector(arbChainId);
+            address arbCrossChainReceiverAddress = registry
+                .getCrossChainAddress(
+                    arbDestinationChainSelector,
+                    "crossChainMessageReceiverAddress"
+                );
+
+            GSM.mirrorUpdateOfTheUserCollateral(
+                arbCrossChainReceiverAddress,
+                block.chainid,
+                msg.sender,
+                tokenId,
+                arbDestinationChainSelector
+            );
+        } else {
+            uint64 ethDestinationChainSelector = registry
+                .getDestinationChainSelector(ethChainId);
+            address receiver = registry.getCrossChainAddress(
+                ethDestinationChainSelector,
+                "crossChainMessageReceiverAddress"
+            );
+            bytes memory data = abi.encode(
+                ACTION_COMMUNICATION_ID,
+                CrossChainPayLoad({
+                    actionType: ActionType.WITHDRAW_COLLATERAL,
+                    chainId: block.chainid,
+                    user: msg.sender,
+                    crossChaintokenId: tokenId,
+                    amountToTransfer: amount,
+                    messageToTransfer: "",
+                    extraInformation: ""
+                })
+            );
+            uint256 fees = crossChainMessageSender.getFee(
+                receiver,
+                data,
+                ethDestinationChainSelector,
+                address(0),
+                amount,
+                false
+            );
+            if (msg.value < fees) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__InsufficentFees();
+            }
+            (bool success, ) = payable(crossChainMessageSender).call{
+                value: fees
+            }("");
+            if (!success) {
+                revert LendingPoolContractErrors
+                    .LendingPoolContract__TransferFailed();
+            }
+            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
+        }
         vault.transferCollateral(msg.sender, s_tokenAddresses[tokenId], amount);
         emit CollateralWithdrawed(
             msg.sender,
@@ -1194,214 +1449,11 @@ contract LendingPoolContract is
         );
     }
 
-    // liquidate function
-    /**
-     * @notice This function allows the liquidation of a borrower's loan if the value of their collateral falls below the required threshold.
-     *
-     * @dev
-     * - A loan is considered liquidatable if the value of the collateral is lower than the required liquidation value.
-     * - In such cases, the collateral is transferred from the borrower’s account to the liquidity pool, and the loan is removed from the system.
-     * - This function also ensures that only approved tokens can be used for liquidation and that it cannot be re-entered during execution (non-reentrancy check).
-     *
-     * The liquidation process involves:
-     * 1. Verifying that the loan is still active by checking if the borrower owes an outstanding amount.
-     * 2. Determining the current value of the collateral in USD using the token’s price feed.
-     * 3. Comparing the value of the collateral against the liquidation threshold, which is calculated as the loan amount plus a liquidation penalty.
-     * 4. If the collateral value is below the liquidation threshold, the collateral is moved back to the liquidity pool and the loan is cleared from the system.
-     * 5. If the collateral is above the liquidation threshold, the liquidation is rejected, and the loan remains active.
-     *
-     * @param user The address of the borrower whose loan is being liquidated.
-     * @param tokenId The address of the token used for the loan (the token collateralized by the borrower).
-     *
-     *
-     *
-     * @dev
-     * This function will emit the `LoanLiquidated` event when the liquidation is successful.
-     * The event contains details about the loan that was liquidated, including the amount borrowed, the value of collateral, and the liquidation threshold.
-     *
-     * @dev
-     * Requirements:
-     * - The `token` must be approved by the contract for liquidation.
-     * - The loan must exist and be active.
-     * - The collateral value must fall below the required liquidation value for the liquidation to proceed.
-     *
-     * @custom:revert LendingPoolContract__LoanIsNotActive The loan does not exist or has been fully repaid, so it cannot be liquidated.
-     * @custom:revert LendingPoolContract__NotLiquidatable The collateral value is greater than the liquidation threshold, so liquidation is not possible.
-     *
-     * event LoanLiquidated
-     * - Emitted when a loan is successfully liquidated.
-     * - Contains details of the loan amount, collateral value, and liquidation value.
-     */
-
-    function liquidate(
-        address user,
-        uint64 tokenId
-    ) internal isTokenApprovedByTheContract(tokenId) nonReentrant {
-        address tokenAddress = s_tokenAddresses[tokenId];
-        LoanDetails storage loan = s_loanDetails[user][tokenId];
-        uint256 loanAmount = loan.amountBorrowedInUSDT;
-        if (loanAmount == 0) {
-            revert LendingPoolContractErrors
-                .LendingPoolContract__LoanIsNotActive();
-        }
-        uint256 collateralValueInUSD = getUsdValue(
-            tokenId,
-            loan.collateralUsed
-        );
-        uint256 liquidationValue = (loanAmount * LIQUIDATION_PENALTY) /
-            PRECISION;
-        if (collateralValueInUSD > liquidationValue && loan.penaltyCount < 2) {
-            revert LendingPoolContractErrors
-                .LendingPoolContract__NotLiquidatable();
-        }
-        s_amountBorrowedInToken[tokenId] -= loan.collateralUsed;
-        s_liquidity[tokenId] += loan.collateralUsed;
-        if (loanAmount > totalBorrowed) {
-            totalBorrowed = 0;
-        } else {
-            totalBorrowed -= loanAmount;
-        }
-        delete s_isBorrower[user][tokenId];
-        delete s_loanDetails[user][tokenId];
-        delete s_lockedCollateralDetails[user][tokenId];
-        emit LoanLiquidated(
-            user,
-            tokenAddress,
-            loanAmount,
-            collateralValueInUSD,
-            liquidationValue
-        );
-    }
-
-    /**
-     * @notice Checks if any borrower's loan has passed its due date and requires liquidation.
-     * @dev This function is used by Chainlink Keepers (or any automated service) to determine if maintenance work is needed.
-     * It loops through all borrowers and their loan tokens to find any overdue loans.
-     * If an overdue loan is found, it returns `true` with encoded borrower and token information.
-     * If no overdue loans are found, it returns `false` and empty performData.
-     *
-     * checkData Not used in this function. Included to match the KeeperCompatibleInterface.
-     * @return upkeepNeeded A boolean value indicating whether upkeep (liquidation) is needed.
-     * @return performData Encoded data containing the borrower address and token address to be used in performUpkeep.
-     */
-
-    function checkUpkeep(
-        bytes calldata /* checkData */
-    )
-        external
-        view
-        override
-        returns (bool upkeepNeeded, bytes memory performData)
-    {
-        for (uint256 i = 0; i < borrowers.length; i++) {
-            address borrower = borrowers[i];
-            uint64[] memory tokens = s_loanTokensForTheUser[borrower];
-            for (uint256 j = 0; j < tokens.length; j++) {
-                LoanDetails storage loan = s_loanDetails[msg.sender][tokens[j]];
-                uint256 collateralValueInUSD = getUsdValue(
-                    tokens[j],
-                    loan.collateralUsed
-                );
-                uint256 liquidationValue = (loan.amountBorrowedInUSDT *
-                    LIQUIDATION_PENALTY) / PRECISION;
-                if (
-                    block.timestamp > loan.dueDate ||
-                    collateralValueInUSD < liquidationValue
-                ) {
-                    return (true, abi.encode(borrower, tokens[j]));
-                }
-            }
-        }
-        return (false, "");
-    }
-
-    /**
-     * @notice Performs the upkeep by liquidating overdue loans.
-     * @dev This function is triggered by Chainlink Keepers (or other automated services)
-     * when `checkUpkeep` signals that upkeep is needed. It decodes the borrower and token from
-     * the `performData`, checks if the loan is overdue, and if so, calls the `liquidate` function.
-     *
-     * @param performData Encoded data containing the borrower's address and the token address,
-     * produced by `checkUpkeep`.
-     */
-    function performUpkeep(bytes calldata performData) external override {
-        (address borrower, uint64 tokenId) = abi.decode(
-            performData,
-            (address, uint64)
-        );
-        LoanDetails storage loan = s_loanDetails[borrower][tokenId];
-
-        if (block.timestamp < loan.dueDate) {
-            return;
-        }
-        if (loan.penaltyCount < 2) {
-            loan.penaltyCount++;
-            loan.dueDate = block.timestamp + 30 days;
-            loan.amountBorrowedInUSDT +=
-                (loan.amountBorrowedInUSDT * LIQUIDATION_PENALTY) /
-                PRECISION;
-        } else {
-            liquidate(borrower, tokenId);
-        }
-    }
-
     // function
 
     ////////////////////
     // Internal
     ////////////////////
-
-    // calculate the utilization ratio
-    /**
-     * @notice Releases the user's locked collateral if the loan is fully repaid.
-     * @dev Reverts if the user still has an outstanding loan.
-     * @param user The address of the borrower.
-     * @param tokenId The address of the token used as collateral.
-     */
-
-    function _releaseCollateral(address user, uint64 tokenId) internal {
-        LoanDetails storage loan = s_loanDetails[user][tokenId];
-        if (loan.amountBorrowedInUSDT != 0) {
-            revert LendingPoolContractErrors
-                .LendingPoolContract__LoanStillPending();
-        }
-
-        s_amountBorrowedInToken[tokenId] -= loan.collateralUsed;
-        s_lockedCollateralDetails[user][tokenId] -= loan.collateralUsed;
-        s_collateralDetails[user][tokenId] += loan.collateralUsed;
-    }
-
-    /**
-     * @notice Accrues the interest for a given token based on the time elapsed since the last accrual.
-     * @dev This function calculates and updates the interest for borrowers by taking into account the
-     * amount of time that has passed since the last interest accrual. It uses the current interest rate
-     * for the token, adjusts it per second, and updates the borrower index accordingly.
-     *
-     * The function performs the following steps:
-     * 1. Calculates the time elapsed since the last accrual.
-     * 2. Retrieves the current annual interest rate for the token using the `_calculateInterestRate` function.
-     * 3. Converts the annual interest rate into a per-second rate.
-     * 4. Calculates the interest factor based on the time elapsed and the per-second rate.
-     * 5. Updates the borrower index (`s_borrowerIndex[token]`) to reflect the accumulated interest.
-     *
-     * After accruing interest, the function updates the last accrual time (`s_lastAccuralTime[token]`)
-     * to the current block timestamp.
-     *
-     * @param tokenId The address of the token for which interest needs to be accrued.
-     */
-    function _accuredInterest(uint64 tokenId) private {
-        uint256 timeElapsed = block.timestamp - s_lastAccuralTime[tokenId];
-        if (timeElapsed == 0) return;
-        uint256 annualInterestRate = IInterestRateModel(
-            interestRateModelAddress
-        ).getInterestRate(tokenId);
-        uint256 ratePerSecond = annualInterestRate / 365 days;
-        uint256 interestFactor = ratePerSecond * timeElapsed;
-        s_borrowerIndex[tokenId] +=
-            (s_borrowerIndex[tokenId] * interestFactor) /
-            1e18;
-        s_lastAccuralTime[tokenId] = block.timestamp;
-    }
 
     /**
      * @notice Mints LP tokens to a specified address based on the provided amount.
@@ -1490,10 +1542,18 @@ contract LendingPoolContract is
      */
 
     function getUserBalance(
+        uint256 chainId,
         address user,
         uint64 tokenId
-    ) public view returns (uint256) {
-        return s_depositDetailsOfUser[block.chainid][user][tokenId];
+    ) external view returns (uint256) {
+        return
+            block.chainid == ethChainId
+                ? GSM.readDepositDetailsOfUser(chainId, user, tokenId)
+                : stateAggregator.readDepositDetailsOfUser(
+                    chainId,
+                    user,
+                    tokenId
+                );
     }
 
     /**
@@ -1641,12 +1701,11 @@ contract LendingPoolContract is
         return s_priceFeed[tokenId];
     }
 
-    function getBorrowerIndex(uint64 tokenId) public view returns (uint256) {
-        return s_borrowerIndex[tokenId];
-    }
-
-    function getInterestRateModelAddress() public view returns (address) {
-        return interestRateModelAddress;
+    function getBorrowerIndex(uint64 tokenId) public returns (uint256) {
+        return
+            block.chainid == ethChainId
+                ? GSM.getBorrowerIndex(tokenId)
+                : stateAggregator.getBorrowerIndex(tokenId);
     }
 
     function getVaultAddress() external view returns (address) {
@@ -1662,11 +1721,14 @@ contract LendingPoolContract is
         /// @dev A simple token transfer across chains.
         TRANSFER,
         /// @dev A liquidity deposit operation from one chain to another.
-        DEPOSIT,
+        DEPOSIT_LIQUIDITY,
+        WITHDRAW_LIQUIDITY,
         /// @dev A collateral deposit for lending/borrowing purposes across chains.
         DEPOSIT_COLLATERAL,
+        WITHDRAW_COLLATERAL,
         /// @dev An indication that a loan has been taken on a different chain.
-        LOAN_TAKEN
+        LOAN_TAKEN,
+        LOAN_REPAYMENT
     }
 
     struct CrossChainPayLoad {
@@ -2039,6 +2101,15 @@ contract LendingPoolContract is
         return address(crossChainMessageSender);
     }
 
+    function getTotalLPTokensForTheUser(
+        address user
+    ) external view returns (uint256) {
+        return
+            block.chainid == ethChainId
+                ? GSM.getLpTokensPerUser(user)
+                : stateAggregator.getLpTokensPerUser(user);
+    }
+
     function getTokenAddressFromTokenId(
         uint64 tokenId
     ) external view returns (address) {
@@ -2145,6 +2216,37 @@ contract LendingPoolContract is
 
     function getCCIPReceiverAddress() external view returns (address) {
         return address(ccipReceiver);
+    }
+
+    function getAmountToRepay(
+        uint256 loanChainId,
+        uint64 tokenId,
+        uint256 loanId
+    ) public returns (uint256 scaledLoanAmount) {
+        bool chainIdentififer = block.chainid == ethChainId;
+        LoanManager.LoanDetails memory loan = chainIdentififer
+            ? GSM.readLoanDetailsOfUser(
+                loanChainId,
+                msg.sender,
+                tokenId,
+                loanId
+            )
+            : stateAggregator.readLoanDetailsOfUser(
+                loanChainId,
+                msg.sender,
+                tokenId,
+                loanId
+            );
+        uint256 principalLoanAmount = loan.amountBorrowedInUSDT;
+        uint256 userBorrowIndex = loan.userBorrowIndex;
+        scaledLoanAmount =
+            (principalLoanAmount *
+                (
+                    chainIdentififer
+                        ? GSM.getBorrowerIndex(tokenId)
+                        : stateAggregator.getBorrowerIndex(tokenId)
+                )) /
+            userBorrowIndex;
     }
 
     receive() external payable {}

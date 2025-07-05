@@ -16,6 +16,8 @@ contract CollateralManager is Ownable {
     mapping(uint256 chainId => mapping(address user => mapping(uint64 tokenId => uint256 amount)))
         private s_lockedCollateralDetails;
 
+    mapping(uint64 tokenId => uint256 amount) private s_totalCollatearlPerToken;
+
     constructor() Ownable(msg.sender) {}
 
     /**
@@ -50,6 +52,7 @@ contract CollateralManager is Ownable {
         uint64 tokenId,
         uint256 amount
     ) external onlyOwner {
+        s_totalCollatearlPerToken[tokenId] += amount;
         s_globalCollateralDetailsForAUser[chainId][user][tokenId] -= amount;
         s_lockedCollateralDetails[chainId][user][tokenId] += amount;
     }
@@ -69,8 +72,9 @@ contract CollateralManager is Ownable {
         uint64 tokenId,
         uint256 amount
     ) external onlyOwner {
-        s_lockedCollateralDetails[chainId][user][tokenId] -= amount;
+        s_totalCollatearlPerToken[tokenId] -= amount;
         s_globalCollateralDetailsForAUser[chainId][user][tokenId] += amount;
+        s_lockedCollateralDetails[chainId][user][tokenId] -= amount;
     }
 
     /**
@@ -118,5 +122,11 @@ contract CollateralManager is Ownable {
         uint64 tokenId
     ) external view returns (uint256) {
         return s_totalCollateralDepositedInTheChain[chainId][tokenId];
+    }
+
+    function getTotalCollateralPerToken(
+        uint64 tokenId
+    ) external view returns (uint256) {
+        return s_totalCollatearlPerToken[tokenId];
     }
 }

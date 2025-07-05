@@ -106,6 +106,8 @@ contract CCIPReceiver is Ownable, ICCIPReceiver {
      */
 
     function ccipReceiver(Client.Any2EVMMessage memory message) external {
+        console.log("reached here 2");
+
         bytes memory rawData = message.data;
         uint64 id;
         // Extract the identifier from the message payload (first 64 bits after 32 bytes offset)
@@ -175,7 +177,103 @@ contract CCIPReceiver is Ownable, ICCIPReceiver {
                 actionPayLoad.actionType ==
                 LendingPoolContract.ActionType.LOAN_TAKEN
             ) {
-                ccipRequestHandler.updateLoanDetailsOfUser(actionPayLoad);
+                ccipRequestHandler.updateBorrowLoanDetailsOfUser(actionPayLoad);
+                // Get receiver on source chain to mirror update
+                address receiver = registry.getCrossChainAddress(
+                    message.sourceChainSelector,
+                    "crossChainMessageReceiverAddress"
+                );
+
+                // Mirror loan state to source chain
+
+                ccipRequestHandler.updateLoanStateMirror(
+                    receiver,
+                    actionPayLoad.chainId,
+                    actionPayLoad.user,
+                    actionPayLoad.crossChaintokenId,
+                    abi
+                        .decode(
+                            actionPayLoad.extraInformation,
+                            (LoanManager.LoanDetails)
+                        )
+                        .loanId,
+                    message.sourceChainSelector
+                );
+            } else if (
+                actionPayLoad.actionType ==
+                LendingPoolContract.ActionType.DEPOSIT_LIQUIDITY
+            ) {
+                ccipRequestHandler.updateDepositDetailsOfUser(
+                    actionPayLoad.chainId,
+                    actionPayLoad.user,
+                    actionPayLoad.crossChaintokenId,
+                    actionPayLoad.amountToTransfer
+                );
+
+                ccipRequestHandler.updateLPTokensInCirculation(
+                    actionPayLoad.chainId,
+                    actionPayLoad.user,
+                    abi.decode(actionPayLoad.extraInformation, (uint256))
+                );
+                address receiver = registry.getCrossChainAddress(
+                    message.sourceChainSelector,
+                    "crossChainMessageReceiverAddress"
+                );
+                ccipRequestHandler.mirrorUpdateOfTheUserDeposit(
+                    receiver,
+                    actionPayLoad.chainId,
+                    actionPayLoad.user,
+                    actionPayLoad.crossChaintokenId,
+                    message.sourceChainSelector
+                );
+            } else if (
+                actionPayLoad.actionType ==
+                LendingPoolContract.ActionType.WITHDRAW_LIQUIDITY
+            ) {
+                ccipRequestHandler.updateWithdrawDepositDetailsOfUser(
+                    actionPayLoad.chainId,
+                    actionPayLoad.user,
+                    actionPayLoad.crossChaintokenId,
+                    actionPayLoad.amountToTransfer
+                );
+
+                address receiver = registry.getCrossChainAddress(
+                    message.sourceChainSelector,
+                    "crossChainMessageReceiverAddress"
+                );
+
+                ccipRequestHandler.mirrorUpdateOfTheUserDeposit(
+                    receiver,
+                    actionPayLoad.chainId,
+                    actionPayLoad.user,
+                    actionPayLoad.crossChaintokenId,
+                    message.sourceChainSelector
+                );
+            } else if (
+                actionPayLoad.actionType ==
+                LendingPoolContract.ActionType.WITHDRAW_COLLATERAL
+            ) {
+                ccipRequestHandler.updateWithdrawDepositCollateralDetailsOfUser(
+                        actionPayLoad
+                    );
+
+                address receiver = registry.getCrossChainAddress(
+                    message.sourceChainSelector,
+                    "crossChainMessageReceiverAddress"
+                );
+                // Send mirror update for collateral
+                ccipRequestHandler.updateCollateralStateMirror(
+                    receiver,
+                    actionPayLoad.chainId,
+                    actionPayLoad.user,
+                    actionPayLoad.crossChaintokenId,
+                    message.sourceChainSelector
+                );
+            } else if (
+                actionPayLoad.actionType ==
+                LendingPoolContract.ActionType.LOAN_REPAYMENT
+            ) {
+                ccipRequestHandler.repayLoanDetailsOfUser(actionPayLoad);
                 // Get receiver on source chain to mirror update
                 address receiver = registry.getCrossChainAddress(
                     message.sourceChainSelector,
@@ -223,10 +321,14 @@ contract CCIPReceiver is Ownable, ICCIPReceiver {
                 responsePayLoad.response ==
                 LendingPoolContract.Response.RESPONSE_LOAN_INFORMATION_FOR_USER
             ) {
-                LoanManager.LoanDetails memory loanInfo = abi.decode(
-                    responsePayLoad.extraInformation,
-                    (LoanManager.LoanDetails)
-                );
+                console.log("reached here 1");
+                (
+                    LoanManager.LoanDetails memory loanInfo,
+                    uint256 borrowerIndex
+                ) = abi.decode(
+                        responsePayLoad.extraInformation,
+                        (LoanManager.LoanDetails, uint256)
+                    );
                 stateAggregator.updateLoanDetailsOfUser(
                     responsePayLoad.chainId,
                     responsePayLoad.user,
@@ -234,6 +336,63 @@ contract CCIPReceiver is Ownable, ICCIPReceiver {
                     loanInfo.loanId,
                     loanInfo
                 );
+                stateAggregator.updateBorrowerIndex(
+                    responsePayLoad.crossChainTokenId,
+                    borrowerIndex
+                );
+            } else if (
+                responsePayLoad.response ==
+                LendingPoolContract
+                    .Response
+                    .RESPONSE_DEPOSIT_INFORMATION_FOR_USER
+            ) {
+                stateAggregator.updateDepositDetailsOfUser(
+                    responsePayLoad.chainId,
+                    responsePayLoad.user,
+                    responsePayLoad.crossChainTokenId,
+                    responsePayLoad.amount
+                );
+                (
+                    uint256 lpTokenPerUser,
+                    uint256 lpTokenPerUserPerChain,
+                    uint256 totalLpTokenInChain,
+                    uint256 lpTokensInCirculation,
+                    uint256 borrowerIndex
+                ) = abi.decode(
+                        responsePayLoad.extraInformation,
+                        (uint256, uint256, uint256, uint256, uint256)
+                    );
+
+                stateAggregator.updateLpTokensForAUser(
+                    responsePayLoad.user,
+                    lpTokenPerUser
+                );
+                stateAggregator.updateLpTokensPerUserPerChain(
+                    responsePayLoad.chainId,
+                    responsePayLoad.user,
+                    lpTokenPerUserPerChain
+                );
+                stateAggregator.updateTotalLpTokensInAChain(
+                    responsePayLoad.chainId,
+                    totalLpTokenInChain
+                );
+                stateAggregator.updateLpTokenInCirculation(
+                    lpTokensInCirculation
+                );
+                stateAggregator.updateBorrowerIndex(
+                    responsePayLoad.crossChainTokenId,
+                    borrowerIndex
+                );
+            } else if (
+                responsePayLoad.response ==
+                LendingPoolContract.Response.RESPONSE_SET_INITAL_PARAMS
+            ) {
+                (uint64 tokenId, uint256 borrowerIndex) = abi.decode(
+                    responsePayLoad.extraInformation,
+                    (uint64, uint256)
+                );
+
+                stateAggregator.updateBorrowerIndex(tokenId, borrowerIndex);
             } else {
                 console.log("No information found");
             }

@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IInterestRateModel} from "../interfaces/IInterestRateModel.sol";
 import {ILendingPoolContract} from "../interfaces/ILendingPoolContract.sol";
+import {IGlobalStateManager} from "../interfaces/IGlobalStateManager.sol";
 import {InterestRateModelErrors} from "../errors/Errors.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import "forge-std/console.sol";
@@ -11,11 +12,16 @@ contract InterestRateModel is IInterestRateModel, Ownable {
     /// ERRORS
 
     ILendingPoolContract private lendingPoolContract;
+    IGlobalStateManager private GSM;
 
     constructor() Ownable(msg.sender) {}
 
-    function setLendingPoolContract(address _lendingPool) external onlyOwner {
+    function setLendingPoolContractAndGSM(
+        address _lendingPool,
+        address gsm
+    ) external onlyOwner {
         lendingPoolContract = ILendingPoolContract(_lendingPool);
+        GSM = IGlobalStateManager(gsm);
     }
 
     modifier isTokenApprovedByTheContract(uint64 tokenId) {
@@ -87,11 +93,13 @@ contract InterestRateModel is IInterestRateModel, Ownable {
     function _calculateUtilizationRatio(
         uint64 assetClassId
     ) internal view returns (uint256 utilizationRatio) {
-        uint256 liquidityPerAssetClass = lendingPoolContract
-            .getTotalLiquidityPerToken(assetClassId);
-        uint256 amountBorrowedPerAssetClass = lendingPoolContract
-            .getTotalBorroweedForAToken(assetClassId);
-        if (liquidityPerAssetClass == 0) {
+        uint256 liquidityPerAssetClass = GSM.getTotalLiquidityPerToken(
+            assetClassId
+        );
+        uint256 amountBorrowedPerAssetClass = GSM.getTotalCollateralPerToken(
+            assetClassId
+        );
+        if (liquidityPerAssetClass == 0 || liquidityPerAssetClass == 0) {
             return 0;
         }
 

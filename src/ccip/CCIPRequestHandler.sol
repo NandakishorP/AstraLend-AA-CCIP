@@ -94,10 +94,24 @@ contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
         );
     }
 
-    function updateLoanDetailsOfUser(
+    function updateBorrowLoanDetailsOfUser(
         LendingPoolContract.CrossChainPayLoad memory actionPayLoad
     ) external {
-        GSM.updateLoanDetailsOfUser(
+        GSM.updateBorrowLoanDetailsOfUser(
+            actionPayLoad.chainId,
+            actionPayLoad.user,
+            actionPayLoad.crossChaintokenId,
+            abi.decode(
+                actionPayLoad.extraInformation,
+                (LoanManager.LoanDetails)
+            )
+        );
+    }
+
+    function repayLoanDetailsOfUser(
+        LendingPoolContract.CrossChainPayLoad memory actionPayLoad
+    ) external {
+        GSM.repayLoanDetailsOfUser(
             actionPayLoad.chainId,
             actionPayLoad.user,
             actionPayLoad.crossChaintokenId,
@@ -124,5 +138,49 @@ contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
             loanId,
             destinationChainSelector
         );
+    }
+
+    function updateDepositDetailsOfUser(
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 amount
+    ) external {
+        GSM.updateDepositDetailsOfUser(chainId, user, tokenId, amount);
+    }
+
+    function mirrorUpdateOfTheUserDeposit(
+        address receiver,
+        uint256 chainId_,
+        address user_,
+        uint64 tokenId,
+        uint64 destinationChainSelector
+    ) external {
+        GSM.mirrorUpdateOfTheUserDeposit(
+            receiver,
+            chainId_,
+            user_,
+            tokenId,
+            destinationChainSelector
+        );
+    }
+
+    function updateLPTokensInCirculation(
+        uint256 chainId,
+        address user,
+        uint256 amount
+    ) external {
+        GSM.updateLPTokenInCirculation(chainId, user, amount);
+    }
+
+    // WITHDRAW DEPOSITS
+
+    function updateWithdrawDepositDetailsOfUser(
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 amount
+    ) external {
+        GSM.updateWithDrawDetailsOfUser(chainId, user, tokenId, amount);
     }
 }

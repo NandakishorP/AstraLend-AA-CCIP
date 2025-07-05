@@ -6,6 +6,8 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {console} from "forge-std/console.sol";
 import {LoanManager} from "../GSM/LoanManager.sol";
 import {LoanStateMirror} from "./LoanStateMirror.sol";
+import {DepositStateMirror} from "./DepositStateMirror.sol";
+import {LPTokenStateMirror} from "./LPTokenStateMirror.sol";
 
 /**
  * @title StateAggregator
@@ -42,9 +44,15 @@ contract StateAggregator is Ownable {
 
     LoanStateMirror loanStateMirror;
 
+    DepositStateMirror depositStateMirror;
+
+    LPTokenStateMirror lpTokenStateMirror;
+
     mapping(address => bool) private s_isAuthorizedToUpdate;
 
     mapping(address => bool) private s_isAuthorizedToRead;
+
+    mapping(uint64 tokenId => uint256 amount) private s_borrowerIndex;
 
     modifier onlyCCIPHandlersCanCall() {
         if (!s_isAuthorizedToUpdate[msg.sender]) {
@@ -58,6 +66,13 @@ contract StateAggregator is Ownable {
             revert StateAggregator__InvalidSender();
         }
         _;
+    }
+
+    constructor() Ownable(msg.sender) {
+        collateralStateMirror = new CollateralStateMirror();
+        loanStateMirror = new LoanStateMirror();
+        depositStateMirror = new DepositStateMirror();
+        lpTokenStateMirror = new LPTokenStateMirror();
     }
 
     function setAuthorizedUpdators(
@@ -74,9 +89,15 @@ contract StateAggregator is Ownable {
         s_isAuthorizedToRead[caller] = status;
     }
 
-    constructor() Ownable(msg.sender) {
-        collateralStateMirror = new CollateralStateMirror();
-        loanStateMirror = new LoanStateMirror();
+    function updateBorrowerIndex(
+        uint64 tokenId,
+        uint256 value
+    ) external onlyCCIPHandlersCanCall {
+        s_borrowerIndex[tokenId] = value;
+    }
+
+    function getBorrowerIndex(uint64 tokenId) external view returns (uint256) {
+        return s_borrowerIndex[tokenId];
     }
 
     // collateral managment
@@ -178,5 +199,99 @@ contract StateAggregator is Ownable {
         uint64 tokenId
     ) external view onlyAuthorizedReadersCanCall returns (bool) {
         return loanStateMirror.getLoanStatusOfUserInAToken(user, tokenId);
+    }
+
+    // DEPOSIT FUNCTIONS
+
+    function updateDepositDetailsOfUser(
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 amount
+    ) external onlyCCIPHandlersCanCall {
+        depositStateMirror.updateDepositDetailsOfUser(
+            chainId,
+            user,
+            tokenId,
+            amount
+        );
+    }
+
+    function readDepositDetailsOfUser(
+        uint256 chainId,
+        address user,
+        uint64 tokenId
+    ) external view returns (uint256) {
+        return
+            depositStateMirror.readDepositDetailsOfUser(chainId, user, tokenId);
+    }
+
+    function readTotalLiquidityPerChainPerToken(
+        uint256 chainId,
+        uint64 tokenId
+    ) external view returns (uint256) {
+        return
+            depositStateMirror.readTotalLiquidityPerChainPerToken(
+                chainId,
+                tokenId
+            );
+    }
+
+    function readTotalLiquidityPerToken(
+        uint64 tokenId
+    ) external view returns (uint256) {
+        return depositStateMirror.readTotalLiquidityPerToken(tokenId);
+    }
+
+    // LP TOKEN
+
+    // visibility is pending
+
+    function updateLpTokensForAUser(address user, uint256 amount) external {
+        lpTokenStateMirror.updateLpTokensForAUser(user, amount);
+    }
+
+    function getLpTokensPerUser(address user) external view returns (uint256) {
+        return lpTokenStateMirror.getLpTokensPerUser(user);
+    }
+
+    function getLpTokensPerUserPerChain(
+        uint64 chainId,
+        address user
+    ) external view returns (uint256) {
+        return lpTokenStateMirror.getLpTokensPerUserPerChain(chainId, user);
+    }
+
+    function updateLpTokensPerUserPerChain(
+        uint256 chainId,
+        address user,
+        uint256 amount
+    ) external {
+        lpTokenStateMirror.updateLpTokensPerUserPerChain(chainId, user, amount);
+    }
+
+    function updateTotalLpTokensInAChain(
+        uint256 chainId,
+        uint256 amount
+    ) external {
+        lpTokenStateMirror.updateTotalLpTokensInAChain(chainId, amount);
+    }
+
+    function updateLpTokenInCirculation(uint256 amount) external {
+        lpTokenStateMirror.updateLpTokenInCirculation(amount);
+    }
+
+    function getTotalLpTokensInAChain(
+        uint64 chainId
+    ) external view returns (uint256) {
+        return lpTokenStateMirror.getTotalLpTokensInAChain(chainId);
+    }
+
+    function getTotalLpTokensInCirculation() external view returns (uint256) {
+        return lpTokenStateMirror.getTotalLpTokensInCirculation();
+    }
+
+    function totalLPTokensInCirculation() external view returns (uint256) {
+        return lpTokenStateMirror.totalLPTokensInCirculation();
     }
 }

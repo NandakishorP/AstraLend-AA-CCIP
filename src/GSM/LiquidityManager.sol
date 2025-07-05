@@ -11,7 +11,9 @@ contract LiquidityManager is Ownable {
         private s_globalDespositDetailsOfUser;
 
     mapping(uint256 chainId => mapping(uint64 tokenId => uint256 amount))
-        private s_globalLiquidityPerToken;
+        private s_globalLiquidityPerTokenPerChain;
+
+    mapping(uint64 tokenId => uint256 amount) private s_globalLiquidityPerToken;
 
     constructor() Ownable(msg.sender) {}
 
@@ -29,7 +31,37 @@ contract LiquidityManager is Ownable {
         uint256 amount
     ) external {
         s_globalDespositDetailsOfUser[chainId][user][tokenId] += amount;
-        s_globalLiquidityPerToken[chainId][tokenId] += amount;
+        s_globalLiquidityPerTokenPerChain[chainId][tokenId] += amount;
+        s_globalLiquidityPerToken[tokenId] += amount;
+    }
+
+    function addLiquidity(
+        uint256 chainId,
+        uint64 tokenId,
+        uint256 amount
+    ) external onlyOwner {
+        s_globalLiquidityPerTokenPerChain[chainId][tokenId] += amount;
+        s_globalLiquidityPerToken[tokenId] += amount;
+    }
+
+    function removeLiquidity(
+        uint256 chainId,
+        uint64 tokenId,
+        uint256 amount
+    ) external onlyOwner {
+        s_globalLiquidityPerTokenPerChain[chainId][tokenId] -= amount;
+        s_globalLiquidityPerToken[tokenId] -= amount;
+    }
+
+    function updateWithDrawDetailsOfUser(
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 amount
+    ) external onlyOwner {
+        s_globalDespositDetailsOfUser[chainId][user][tokenId] -= amount;
+        s_globalLiquidityPerTokenPerChain[chainId][tokenId] -= amount;
+        s_globalLiquidityPerToken[tokenId] -= amount;
     }
 
     /// @notice Returns the deposited amount of a specific token by a user on a given chain.
@@ -55,6 +87,12 @@ contract LiquidityManager is Ownable {
         uint256 chainId,
         uint64 tokenId
     ) external view returns (uint256) {
-        return s_globalLiquidityPerToken[chainId][tokenId];
+        return s_globalLiquidityPerTokenPerChain[chainId][tokenId];
+    }
+
+    function getTotalLiquidityPerToken(
+        uint64 tokenId
+    ) external view returns (uint256) {
+        return s_globalLiquidityPerToken[tokenId];
     }
 }

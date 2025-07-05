@@ -17,6 +17,7 @@ contract LoanManager is Ownable {
         uint256 interestPaid; //                         | The total interest paid by the user over time
         uint256 liquidationPoint; //                     | The liquidation point for the loan, calculated as LTV * collateral amount
         uint256 dueDate; //                              |   Timestamp when the loan repayment is due
+        bool isClosed;
         uint256 loanId; //  ─────────────────────────────╯
         uint8 penaltyCount; // ───────────────────────────────╮ Penalty count  after due date (limit is 2)
         bool isLiquidated; // ────────────────────────────────╯ True if the loan has been liquidated due to default
@@ -36,6 +37,37 @@ contract LoanManager is Ownable {
     mapping(address user => mapping(uint64 tokenId => bool))
         private s_isBorrower;
 
+    mapping(uint64 tokenId => uint256 amount) private s_totalBorrowedPerToken;
+
+    /// @notice Stores the list of tokens for which a user has active loans.
+    /// @dev Maps a user address to an array of token addresses they have borrowed against.
+
+    mapping(address user => uint64[] tokens) private s_loanTokensForTheUser;
+
+    mapping(address user => uint256[] chainId) private s_chainsUserTakeLoanFrom;
+
+    address[] private borrowers;
+
+    function getLengthOfBorrowerArray() external view returns (uint256) {
+        return borrowers.length;
+    }
+
+    function getBorrower(uint256 id) external view returns (address) {
+        return borrowers[id];
+    }
+
+    function getLoanTokensForTheUser(
+        address user
+    ) external view returns (uint64[] memory) {
+        return s_loanTokensForTheUser[user];
+    }
+
+    function getLoanChainsForTheUser(
+        address user
+    ) external view returns (uint256[] memory) {
+        return s_chainsUserTakeLoanFrom[user];
+    }
+
     /// @notice Updates the loan details for a user on a specific chain and token.
     /// @dev Only callable by the contract owner.
     /// @param chainId The chain ID on which the loan was taken.
@@ -50,7 +82,53 @@ contract LoanManager is Ownable {
         uint256 loanId,
         LoanDetails memory loanDetails
     ) external onlyOwner {
+        // Check if the chainId is already present
+        bool chainExists = false;
+        uint256[] storage chains = s_chainsUserTakeLoanFrom[user];
+        for (uint256 i = 0; i < chains.length; i++) {
+            if (chains[i] == chainId) {
+                chainExists = true;
+                break;
+            }
+        }
+        if (!chainExists) {
+            chains.push(chainId);
+        }
+
+        // Check if the tokenId is already present
+        bool tokenExists = false;
+        uint64[] storage tokens = s_loanTokensForTheUser[user];
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (tokens[i] == tokenId) {
+                tokenExists = true;
+                break;
+            }
+        }
+        if (!tokenExists) {
+            tokens.push(tokenId);
+        }
+        // Update the loan details
         s_loanDetails[chainId][user][tokenId][loanId] = loanDetails;
+    }
+
+    function updateAddBorrowedPerToken(
+        uint64 tokenId,
+        uint256 amount
+    ) external onlyOwner {
+        s_totalBorrowedPerToken[tokenId] += amount;
+    }
+
+    function updateRemoveBorrowedPerToken(
+        uint64 tokenId,
+        uint256 amount
+    ) external onlyOwner {
+        s_totalBorrowedPerToken[tokenId] -= amount;
+    }
+
+    function readTotalBorrwedPerToken(
+        uint64 tokenId
+    ) external view onlyOwner returns (uint256) {
+        return s_totalBorrowedPerToken[tokenId];
     }
 
     /// @notice Updates the borrower status of a user for a given token.
@@ -113,5 +191,14 @@ contract LoanManager is Ownable {
         uint64 tokenId
     ) external view onlyOwner returns (uint256) {
         return s_numberOfLoansTaken[chainId][user][tokenId];
+    }
+
+    function deleteLoanDetails(
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 loanId
+    ) external onlyOwner {
+        delete s_loanDetails[chainId][user][tokenId][loanId];
     }
 }

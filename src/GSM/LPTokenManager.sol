@@ -11,11 +11,11 @@ contract LPTokenManager is Ownable {
     mapping(address user => uint256 amount) private s_TotalLPTokenOwned;
 
     /// @notice LP tokens owned by each user on a specific chain.
-    mapping(uint64 chainId => mapping(address user => uint256 amount))
+    mapping(uint256 chainId => mapping(address user => uint256 amount))
         private s_LPTokenOwned;
 
     /// @notice Total LP tokens in circulation on each chain.
-    mapping(uint64 chainId => uint256 amount) private s_LPtokenInCirculation;
+    mapping(uint256 chainId => uint256 amount) private s_LPtokenInCirculation;
 
     /// @notice Total LP tokens in circulation across all chains.
     uint256 private s_totalLPTokensInCirculation;
@@ -28,7 +28,7 @@ contract LPTokenManager is Ownable {
     /// @param user The address of the user receiving LP tokens.
     /// @param amount The amount of LP tokens to be added.
     function updateLpTokenInCirculation(
-        uint64 chainId,
+        uint256 chainId,
         address user,
         uint256 amount
     ) external {
@@ -52,7 +52,7 @@ contract LPTokenManager is Ownable {
     /// @return The LP token amount owned by the user on the given chain.
 
     function getLpTokensPerUserPerChain(
-        uint64 chainId,
+        uint256 chainId,
         address user
     ) external view returns (uint256) {
         return s_LPTokenOwned[chainId][user];
@@ -63,17 +63,12 @@ contract LPTokenManager is Ownable {
     /// @return The total circulating LP tokens on that chain.
 
     function getTotalLpTokensInAChain(
-        uint64 chainId
+        uint256 chainId
     ) external view returns (uint256) {
         return s_LPtokenInCirculation[chainId];
     }
 
     function getTotalLpTokensInCirculation() external view returns (uint256) {
         return s_totalLPTokensInCirculation;
-    }
-
-    function totalLPTokensInCirculation() external view returns (uint256) {
-        return
-            s_LPtokenInCirculation[11155111] + s_LPtokenInCirculation[421614];
     }
 }

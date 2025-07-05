@@ -8,6 +8,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 using SafeERC20 for IERC20;
 import {console} from "forge-std/console.sol";
 import {ICrossChainMessageSender} from "./interfaces/ICrossChainMessageSender.sol";
+import {IRegistry} from "../interfaces/IRegistry.sol";
 
 contract CrossChainMessageSender is Ownable {
     event TokenSend(bytes32 messageId);
@@ -98,6 +99,7 @@ contract CrossChainMessageSender is Ownable {
             ),
             feeToken: address(0)
         });
+
         uint256 fees = IRouterClient(router).getFee(
             destinationChainSelector,
             message

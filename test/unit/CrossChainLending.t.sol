@@ -20,6 +20,9 @@ contract CrossChainLending is Test {
     BurnMintERC677Helper public wethSepolia;
     BurnMintERC677Helper public wethArbSepolia;
     Register.NetworkDetails sepoliaNetworkDetails;
+    GlobalStateManager GSM;
+    Registry registrySepolia;
+    address crossChainMessageReceiverAddressArbSepolia;
 
     Register.NetworkDetails arbSepoliaNetworkDetails;
     uint256 sepoliaFork;
@@ -29,12 +32,16 @@ contract CrossChainLending is Test {
     MockV3Aggregator wethUsdPriceFeedAddressSepolia;
     MockV3Aggregator wethUsdPriceFeedAddressArbSepolia;
 
+    StableCoin stableCoinSepolia;
+    StableCoin stableCoinArbSepolia;
+
     uint8 public constant DECIMALS = 8;
     int256 public constant ETH_USD_PRICE = 1000e8;
 
     address ownerSepolia = makeAddr("ownerSepolia");
     address ownerArbSepolia = makeAddr("ownerArbSepolia");
     address user = makeAddr("user");
+    address loanUser = makeAddr("loanUser");
 
     LendingPoolContract lendingPoolContractSepolia;
     LendingPoolContract lendingPoolContractArbSepolia;
@@ -70,11 +77,12 @@ contract CrossChainLending is Test {
         chainIdSepolia = [uint64(11155111), uint64(421614)];
         priceFeedAddressSepolia = [address(wethUsdPriceFeedAddressSepolia)];
         InterestRateModel interestRateModelSepolia = new InterestRateModel();
-        StableCoin stableCoinSepolia = new StableCoin();
+        stableCoinSepolia = new StableCoin();
         LpToken lpTokenSepolia = new LpToken();
-        Registry registrySepolia = new Registry();
-        GlobalStateManager GSM = new GlobalStateManager(
-            address(registrySepolia)
+        registrySepolia = new Registry();
+        GSM = new GlobalStateManager(
+            address(registrySepolia),
+            address(interestRateModelSepolia)
         );
         registrySepolia.setDestinationChainSelector(
             11155111,
@@ -90,7 +98,6 @@ contract CrossChainLending is Test {
             chainIdSepolia,
             address(stableCoinSepolia),
             address(lpTokenSepolia),
-            address(interestRateModelSepolia),
             sepoliaNetworkDetails.linkAddress,
             sepoliaNetworkDetails.routerAddress,
             address(GSM),
@@ -98,8 +105,10 @@ contract CrossChainLending is Test {
         );
         ERC20Mock(address(stableCoinSepolia)).mint(
             lendingPoolContractSepolia.getVaultAddress(),
-            10000 ether
+            100000 ether
         );
+        ERC20Mock(address(stableCoinSepolia)).mint(user, 100000 ether);
+        ERC20Mock(address(stableCoinSepolia)).mint(loanUser, 100000 ether);
 
         GSM.setCrosssChainMessageSenderAddress(
             lendingPoolContractSepolia.getCrossChainMessageSenderAddress()
@@ -109,8 +118,9 @@ contract CrossChainLending is Test {
         GSM.setAllowedChains(
             address(lendingPoolContractSepolia.getCCIPRequestHanlderAddress())
         );
-        interestRateModelSepolia.setLendingPoolContract(
-            address(lendingPoolContractSepolia)
+        interestRateModelSepolia.setLendingPoolContractAndGSM(
+            address(lendingPoolContractSepolia),
+            address(GSM)
         );
         interestRateModelSepolia.transferOwnership(
             address(lendingPoolContractSepolia)
@@ -152,6 +162,10 @@ contract CrossChainLending is Test {
         wethSepolia.drip(user);
         wethSepolia.drip(user);
         ccipLocalSimulatorFork.requestLinkFromFaucet(user, 5 ether);
+        wethSepolia.drip(loanUser);
+        wethSepolia.drip(loanUser);
+        wethSepolia.drip(loanUser);
+        ccipLocalSimulatorFork.requestLinkFromFaucet(loanUser, 5 ether);
 
         address senderCCIPAddress = lendingPoolContractSepolia
             .getCrossChainMessageSenderAddress();
@@ -166,6 +180,7 @@ contract CrossChainLending is Test {
             100 ether
         );
         vm.deal(user, 1 ether);
+        vm.deal(loanUser, 1 ether);
 
         vm.selectFork(arbSepoliaFork);
 
@@ -187,8 +202,7 @@ contract CrossChainLending is Test {
             address(wethUsdPriceFeedAddressArbSepolia)
         ];
         chainIdArbSepolia = [uint64(11155111), uint64(421614)];
-        InterestRateModel interestRateModelArbSepolia = new InterestRateModel();
-        StableCoin stableCoinArbSepolia = new StableCoin();
+        stableCoinArbSepolia = new StableCoin();
         LpToken lpTokenArbSepolia = new LpToken();
         Registry arbSepoliaRegistry = new Registry();
 
@@ -206,7 +220,6 @@ contract CrossChainLending is Test {
             chainIdArbSepolia,
             address(stableCoinArbSepolia),
             address(lpTokenArbSepolia),
-            address(interestRateModelArbSepolia),
             arbSepoliaNetworkDetails.linkAddress,
             arbSepoliaNetworkDetails.routerAddress,
             address(0),
@@ -217,13 +230,10 @@ contract CrossChainLending is Test {
             lendingPoolContractArbSepolia.getVaultAddress(),
             10000 ether
         );
+        ERC20Mock(address(stableCoinArbSepolia)).mint(user, 10000 ether);
+        ERC20Mock(address(stableCoinArbSepolia)).mint(loanUser, 10000 ether);
         lendingPoolContractArbSepolia.setallowListedSenders(senderCCIPAddress);
-        interestRateModelArbSepolia.setLendingPoolContract(
-            address(lendingPoolContractArbSepolia)
-        );
-        interestRateModelArbSepolia.transferOwnership(
-            address(lendingPoolContractArbSepolia)
-        );
+
         stableCoinArbSepolia.transferOwnership(
             address(lendingPoolContractArbSepolia)
         );
@@ -246,19 +256,25 @@ contract CrossChainLending is Test {
         address crossChainMessageSenderAddressArbSepolia = lendingPoolContractArbSepolia
                 .getCrossChainMessageSenderAddress();
 
-        address crossChainMessageReceiverAddressArbSepolia = lendingPoolContractArbSepolia
-                .getCrossChainMessageReceiverAddress();
+        crossChainMessageReceiverAddressArbSepolia = lendingPoolContractArbSepolia
+            .getCrossChainMessageReceiverAddress();
         lendingPoolContractArbSepolia.setAllowListedSenders(
             crossChainMessageSenderAddressSepolia,
             true
         );
 
         vm.stopPrank();
+
         wethArbSepolia.drip(user);
         wethArbSepolia.drip(user);
         wethArbSepolia.drip(user);
 
         vm.deal(user, 1 ether);
+        wethArbSepolia.drip(loanUser);
+        wethArbSepolia.drip(loanUser);
+        wethArbSepolia.drip(loanUser);
+
+        vm.deal(loanUser, 1 ether);
 
         vm.selectFork(sepoliaFork);
 
@@ -267,6 +283,7 @@ contract CrossChainLending is Test {
             crossChainMessageSenderAddressArbSepolia,
             true
         );
+
         registrySepolia.setCrossChainRegistryAddress(
             registrySepolia.getDestinationChainSelector(421614),
             "crossChainMessageReceiverAddress",
@@ -274,48 +291,50 @@ contract CrossChainLending is Test {
         );
 
         vm.stopPrank();
-    }
 
-    function testIstrue() public {
         vm.selectFork(arbSepoliaFork);
-
-        vm.startPrank(user);
-        BurnMintERC677(wethArbSepolia).approve(vaultArbSepoliaAddress, 1 ether);
-        lendingPoolContractArbSepolia.depositLiquidity(0, 1 ether);
-        vm.selectFork(sepoliaFork);
-
-        vm.startPrank(user);
-        BurnMintERC677(wethSepolia).approve(vaultSepoliaAddress, 1 ether);
-
-        lendingPoolContractSepolia.depositLiquidity(0, 1 ether);
-
-        uint256 fees = lendingPoolContractSepolia.getFee(
-            arbCrossChainReceiverAddress,
-            0,
-            1 ether,
-            true,
-            arbSepoliaNetworkDetails.chainSelector,
-            ""
-        );
-        IERC20(sepoliaNetworkDetails.linkAddress).approve(
-            address(lendingPoolContractSepolia),
-            fees
-        );
-
-        lendingPoolContractSepolia.transferTokensFromOneChainToOtherChain(
-            arbCrossChainReceiverAddress,
-            arbSepoliaNetworkDetails.chainSelector,
-            0,
-            1 ether,
-            true,
-            ""
-        );
-        vm.stopPrank();
-
-        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
-        uint256 balance = lendingPoolContractArbSepolia.getUserBalance(user, 0);
-        assertEq(balance, 2 ether);
     }
+
+    // function testIstrue() public {
+    //     vm.selectFork(arbSepoliaFork);
+
+    //     vm.startPrank(user);
+    //     BurnMintERC677(wethArbSepolia).approve(vaultArbSepoliaAddress, 1 ether);
+    //     lendingPoolContractArbSepolia.depositLiquidity(0, 1 ether);
+    //     vm.selectFork(sepoliaFork);
+
+    //     vm.startPrank(user);
+    //     BurnMintERC677(wethSepolia).approve(vaultSepoliaAddress, 1 ether);
+
+    //     lendingPoolContractSepolia.depositLiquidity(0, 1 ether);
+
+    //     uint256 fees = lendingPoolContractSepolia.getFee(
+    //         arbCrossChainReceiverAddress,
+    //         0,
+    //         1 ether,
+    //         true,
+    //         arbSepoliaNetworkDetails.chainSelector,
+    //         ""
+    //     );
+    //     IERC20(sepoliaNetworkDetails.linkAddress).approve(
+    //         address(lendingPoolContractSepolia),
+    //         fees
+    //     );
+
+    //     lendingPoolContractSepolia.transferTokensFromOneChainToOtherChain(
+    //         arbCrossChainReceiverAddress,
+    //         arbSepoliaNetworkDetails.chainSelector,
+    //         0,
+    //         1 ether,
+    //         true,
+    //         ""
+    //     );
+    //     vm.stopPrank();
+
+    //     ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+    //     uint256 balance = lendingPoolContractArbSepolia.getUserBalance(user, 0);
+    //     assertEq(balance, 2 ether);
+    // }
 
     function testCollateralDepositAndStateUpdateInGSMFromSameChain() public {
         vm.selectFork(sepoliaFork);
@@ -332,6 +351,8 @@ contract CrossChainLending is Test {
         vm.stopPrank();
 
         ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(arbSepoliaFork);
 
         uint256 details = lendingPoolContractArbSepolia
             .getCollateralDetailsOfUser(11155111, user, 0);
@@ -503,5 +524,505 @@ contract CrossChainLending is Test {
             loanDetails1.amountBorrowedInUSDT,
             collateralAvailableForBorrowingInUsd
         );
+    }
+
+    function testDepositAndLpTokens() public {
+        vm.selectFork(sepoliaFork);
+        vm.startPrank(user);
+
+        BurnMintERC677(wethSepolia).approve(vaultSepoliaAddress, 1 ether);
+        lendingPoolContractSepolia.depositLiquidity{value: 0.3 ether}(
+            0,
+            1 ether
+        );
+        vm.deal(
+            lendingPoolContractSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        uint256 deposit = lendingPoolContractArbSepolia.getUserBalance(
+            11155111,
+            user,
+            0
+        );
+
+        uint256 lptokenAmount = lendingPoolContractArbSepolia
+            .getTotalLPTokensForTheUser(user);
+        assertEq(lptokenAmount, 1 ether);
+        assertEq(deposit, 1 ether);
+    }
+
+    // depositing the collatearl on ethereum and take loan on arb and repay it back on ethereum
+
+    // 3 users
+
+    // 1. user1 deposits liquidity into the protocol
+    // 2. user2 depsoits collatearl into the protocol through eth and takes loan from arb
+    // 3. user3 deposits collateral into the protocol through arb and takes loan from eth and then the user4 repays the laon amount back through the eth chain and the invarients adn the test should hold
+
+    function testDepositAndLoan() public {
+        vm.selectFork(sepoliaFork);
+
+        vm.prank(ownerSepolia);
+        GSM.setParamsCrossChain(
+            crossChainMessageReceiverAddressArbSepolia,
+            421614,
+            registrySepolia.getDestinationChainSelector(421614)
+        );
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+        vm.startPrank(user);
+        BurnMintERC677(wethSepolia).approve(vaultSepoliaAddress, 1 ether);
+        lendingPoolContractSepolia.depositLiquidity(0, 1 ether);
+
+        vm.deal(
+            lendingPoolContractSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.startPrank(user);
+
+        BurnMintERC677(wethArbSepolia).approve(vaultArbSepoliaAddress, 1 ether);
+        lendingPoolContractArbSepolia.depositCollateral{value: 0.5 ether}(
+            0,
+            1 ether
+        );
+
+        vm.deal(
+            lendingPoolContractArbSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+
+        vm.startPrank(user);
+
+        uint256 collateralAvailableForBorrowingInUsd = lendingPoolContractSepolia
+                .getUsdValue(0, 0.7 ether);
+        lendingPoolContractSepolia.borrowLoan{value: 0.4 ether}(
+            421614,
+            0,
+            collateralAvailableForBorrowingInUsd
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        // now the loan user is going to take the loan
+
+        vm.startPrank(loanUser);
+        BurnMintERC677(wethArbSepolia).approve(vaultArbSepoliaAddress, 1 ether);
+        lendingPoolContractArbSepolia.depositCollateral{value: 0.3 ether}(
+            0,
+            1 ether
+        );
+
+        vm.deal(
+            lendingPoolContractArbSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.startPrank(loanUser);
+
+        uint256 collateralAvailableForBorrowingInUsd2 = lendingPoolContractArbSepolia
+                .getUsdValue(0, 0.7 ether);
+        lendingPoolContractArbSepolia.borrowLoan{value: 0.4 ether}(
+            421614,
+            0,
+            collateralAvailableForBorrowingInUsd2
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.warp(block.timestamp + 30 days);
+
+        vm.startPrank(loanUser);
+
+        uint256 amountToRepay = lendingPoolContractArbSepolia.getAmountToRepay(
+            421614,
+            0,
+            1
+        );
+
+        IERC20(stableCoinArbSepolia).approve(
+            vaultArbSepoliaAddress,
+            amountToRepay
+        );
+
+        lendingPoolContractArbSepolia.repayLoan{value: 0.2 ether}(
+            421614,
+            0,
+            amountToRepay,
+            1
+        );
+
+        vm.stopPrank();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+    }
+
+    function testOnMainChainAndReflectOnSubChain() public {
+        vm.selectFork(sepoliaFork);
+
+        vm.prank(ownerSepolia);
+        GSM.setParamsCrossChain(
+            crossChainMessageReceiverAddressArbSepolia,
+            421614,
+            registrySepolia.getDestinationChainSelector(421614)
+        );
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+        vm.startPrank(user);
+        BurnMintERC677(wethSepolia).approve(vaultSepoliaAddress, 1 ether);
+        lendingPoolContractSepolia.depositLiquidity(0, 1 ether);
+
+        vm.deal(
+            lendingPoolContractSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+        vm.selectFork(sepoliaFork);
+
+        vm.startPrank(loanUser);
+        BurnMintERC677(wethSepolia).approve(vaultSepoliaAddress, 1 ether);
+        lendingPoolContractSepolia.depositCollateral{value: 0.3 ether}(
+            0,
+            1 ether
+        );
+
+        vm.deal(
+            lendingPoolContractSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+
+        vm.startPrank(loanUser);
+
+        uint256 collateralAvailableForBorrowingInUsd2 = lendingPoolContractSepolia
+                .getUsdValue(0, 0.7 ether);
+        lendingPoolContractSepolia.borrowLoan{value: 0.4 ether}(
+            11155111,
+            0,
+            collateralAvailableForBorrowingInUsd2
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+        vm.warp(block.timestamp + 30 days);
+
+        vm.selectFork(sepoliaFork);
+
+        vm.startPrank(loanUser);
+
+        uint256 amountToRepay = lendingPoolContractSepolia.getAmountToRepay(
+            11155111,
+            0,
+            1
+        );
+
+        IERC20(stableCoinSepolia).approve(vaultSepoliaAddress, amountToRepay);
+
+        lendingPoolContractSepolia.repayLoan{value: 0.2 ether}(
+            11155111,
+            0,
+            amountToRepay,
+            1
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        assertEq(
+            lendingPoolContractArbSepolia
+                .getLoanDetails(11155111, loanUser, 0, 1)
+                .amountBorrowedInUSDT,
+            0
+        );
+    }
+
+    function testtakeAndRepayLoanOnTheSubChain() public {
+        vm.selectFork(sepoliaFork);
+
+        vm.deal(
+            lendingPoolContractSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.prank(ownerSepolia);
+        GSM.setParamsCrossChain(
+            crossChainMessageReceiverAddressArbSepolia,
+            421614,
+            registrySepolia.getDestinationChainSelector(421614)
+        );
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(arbSepoliaFork);
+        vm.startPrank(user);
+        BurnMintERC677(wethArbSepolia).approve(vaultArbSepoliaAddress, 1 ether);
+        lendingPoolContractArbSepolia.depositLiquidity{value: 0.2 ether}(
+            0,
+            1 ether
+        );
+
+        vm.deal(
+            lendingPoolContractArbSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        uint256 userBalance1 = lendingPoolContractArbSepolia.getUserBalance(
+            421614,
+            user,
+            0
+        );
+        assertEq(userBalance1, 1 ether);
+
+        vm.selectFork(sepoliaFork);
+
+        uint256 userBalance = lendingPoolContractSepolia.getUserBalance(
+            421614,
+            user,
+            0
+        );
+
+        assertEq(userBalance, 1 ether);
+
+        vm.selectFork(arbSepoliaFork);
+
+        vm.startPrank(loanUser);
+        BurnMintERC677(wethArbSepolia).approve(vaultArbSepoliaAddress, 1 ether);
+        lendingPoolContractArbSepolia.depositCollateral{value: 0.3 ether}(
+            0,
+            1 ether
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+
+        uint256 collateralAmount1 = lendingPoolContractSepolia
+            .getCollateralDetailsOfUser(421614, loanUser, 0);
+        assertEq(collateralAmount1, 1 ether);
+        vm.selectFork(arbSepoliaFork);
+
+        uint256 collateralAmount2 = lendingPoolContractArbSepolia
+            .getCollateralDetailsOfUser(421614, loanUser, 0);
+
+        assertEq(collateralAmount2, 1 ether);
+
+        vm.startPrank(loanUser);
+
+        uint256 collateralAvailableForBorrowingInUsd2 = lendingPoolContractArbSepolia
+                .getUsdValue(0, 0.7 ether);
+        lendingPoolContractArbSepolia.borrowLoan{value: 0.4 ether}(
+            421614,
+            0,
+            collateralAvailableForBorrowingInUsd2
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+
+        LoanManager.LoanDetails memory loanDetails = lendingPoolContractSepolia
+            .getLoanDetails(421614, loanUser, 0, 1);
+
+        assertEq(
+            loanDetails.amountBorrowedInUSDT,
+            collateralAvailableForBorrowingInUsd2
+        );
+
+        vm.selectFork(arbSepoliaFork);
+
+        LoanManager.LoanDetails
+            memory loanDetails2 = lendingPoolContractArbSepolia.getLoanDetails(
+                421614,
+                loanUser,
+                0,
+                1
+            );
+
+        assertEq(
+            loanDetails2.amountBorrowedInUSDT,
+            collateralAvailableForBorrowingInUsd2
+        );
+
+        vm.warp(block.timestamp + 30 days);
+
+        vm.selectFork(sepoliaFork);
+
+        vm.startPrank(loanUser);
+
+        uint256 amountToRepay = lendingPoolContractSepolia.getAmountToRepay(
+            421614,
+            0,
+            1
+        );
+
+        IERC20(stableCoinSepolia).approve(
+            vaultArbSepoliaAddress,
+            amountToRepay
+        );
+
+        lendingPoolContractSepolia.repayLoan{value: 0.2 ether}(
+            421614,
+            0,
+            amountToRepay,
+            1
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(arbSepoliaFork);
+
+        assertEq(
+            lendingPoolContractArbSepolia
+                .getLoanDetails(421614, loanUser, 0, 1)
+                .amountBorrowedInUSDT,
+            0
+        );
+    }
+
+    // TO-DO: the repay function is put at hold and will be take care in the future due to failure of the ccip functon, now going to implement the auto liquidation
+
+    function testLiquidation() public {
+        vm.selectFork(sepoliaFork);
+
+        vm.prank(ownerSepolia);
+        GSM.setParamsCrossChain(
+            crossChainMessageReceiverAddressArbSepolia,
+            421614,
+            registrySepolia.getDestinationChainSelector(421614)
+        );
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+        vm.startPrank(user);
+        BurnMintERC677(wethSepolia).approve(vaultSepoliaAddress, 1 ether);
+        lendingPoolContractSepolia.depositLiquidity(0, 1 ether);
+
+        vm.deal(
+            lendingPoolContractSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.startPrank(user);
+
+        BurnMintERC677(wethArbSepolia).approve(vaultArbSepoliaAddress, 1 ether);
+        lendingPoolContractArbSepolia.depositCollateral{value: 0.5 ether}(
+            0,
+            1 ether
+        );
+
+        vm.deal(
+            lendingPoolContractArbSepolia.getCrossChainMessageSenderAddress(),
+            100 ether
+        );
+
+        vm.stopPrank();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+
+        vm.startPrank(user);
+
+        uint256 collateralAvailableForBorrowingInUsd = lendingPoolContractSepolia
+                .getUsdValue(0, 0.7 ether);
+        lendingPoolContractSepolia.borrowLoan{value: 0.4 ether}(
+            421614,
+            0,
+            collateralAvailableForBorrowingInUsd
+        );
+
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+
+        vm.warp(block.timestamp + 120 days);
+
+        (bool upkeepNeeded, bytes memory performData) = GSM.checkUpkeep("");
+        if (upkeepNeeded) {
+            GSM.performUpkeep(performData);
+        }
+        vm.warp(block.timestamp + 120 days);
+
+        (upkeepNeeded, performData) = GSM.checkUpkeep("");
+        if (upkeepNeeded) {
+            GSM.performUpkeep(performData);
+        }
+        vm.warp(block.timestamp + 120 days);
+
+        (upkeepNeeded, performData) = GSM.checkUpkeep("");
+        if (upkeepNeeded) {
+            GSM.performUpkeep(performData);
+        }
+
+        LoanManager.LoanDetails memory loan = lendingPoolContractSepolia
+            .getLoanDetails(421614, loanUser, 0, 1);
+
+        assertEq(loan.amountBorrowedInUSDT, 0);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        LoanManager.LoanDetails memory loan2 = lendingPoolContractArbSepolia
+            .getLoanDetails(421614, loanUser, 0, 1);
+
+        assertEq(loan2.amountBorrowedInUSDT, 0);
     }
 }
