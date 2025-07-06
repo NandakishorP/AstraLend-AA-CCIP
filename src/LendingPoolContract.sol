@@ -452,7 +452,6 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
         lpToken = lpTokenAddress;
         vault = IVault(address(new Vault(address(this), i_stableCoinAddress)));
         crossChainMessageSender = new CrossChainMessageSender(link_, router_);
-
         linkToken = link_;
         stateAggregator = new StateAggregator();
 

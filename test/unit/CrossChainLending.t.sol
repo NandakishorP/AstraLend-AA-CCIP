@@ -907,10 +907,7 @@ contract CrossChainLending is Test {
             1
         );
 
-        IERC20(stableCoinSepolia).approve(
-            vaultArbSepoliaAddress,
-            amountToRepay
-        );
+        IERC20(stableCoinSepolia).approve(vaultSepoliaAddress, amountToRepay);
 
         lendingPoolContractSepolia.repayLoan{value: 0.2 ether}(
             421614,
