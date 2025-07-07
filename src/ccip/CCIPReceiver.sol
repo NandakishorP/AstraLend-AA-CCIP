@@ -148,6 +148,7 @@ contract CCIPReceiver is Ownable, ICCIPReceiver {
             );
         }
         // Case 2: No tokens received, processing payload logic
+        // for invarient testing we are replaing the condition block.chainid == ethChainId with the a chainId from the
         else if (block.chainid == ethChainId) {
             // Handle collateral deposit update on Ethereum chain
             if (
@@ -284,7 +285,12 @@ contract CCIPReceiver is Ownable, ICCIPReceiver {
 
                 ccipRequestHandler.updateLoanStateMirror(
                     receiver,
-                    actionPayLoad.chainId,
+                    abi
+                        .decode(
+                            actionPayLoad.extraInformation,
+                            (LoanManager.LoanDetails)
+                        )
+                        .loanChainId,
                     actionPayLoad.user,
                     actionPayLoad.crossChaintokenId,
                     abi

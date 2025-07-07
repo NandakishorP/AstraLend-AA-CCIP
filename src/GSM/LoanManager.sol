@@ -16,6 +16,7 @@ contract LoanManager is Ownable {
         uint256 userBorrowIndex; //                      | The borrowerIndex of the contract when the user made any last update on the loan
         uint256 interestPaid; //                         | The total interest paid by the user over time
         uint256 liquidationPoint; //                     | The liquidation point for the loan, calculated as LTV * collateral amount
+        uint256 loanChainId;
         uint256 dueDate; //                              |   Timestamp when the loan repayment is due
         bool isClosed;
         uint256 loanId; //  ─────────────────────────────╯

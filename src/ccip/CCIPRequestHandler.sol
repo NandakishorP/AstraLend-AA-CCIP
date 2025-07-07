@@ -112,7 +112,12 @@ contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
         LendingPoolContract.CrossChainPayLoad memory actionPayLoad
     ) external {
         GSM.repayLoanDetailsOfUser(
-            actionPayLoad.chainId,
+            abi
+                .decode(
+                    actionPayLoad.extraInformation,
+                    (LoanManager.LoanDetails)
+                )
+                .loanChainId,
             actionPayLoad.user,
             actionPayLoad.crossChaintokenId,
             abi.decode(

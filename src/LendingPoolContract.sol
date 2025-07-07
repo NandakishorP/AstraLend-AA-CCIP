@@ -99,6 +99,8 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
     /// @dev Mapping to track deposited token amounts per user
     /// @custom:structure mapping(user => mapping(token => amount))
 
+    // a funcitonality not in provision anymore
+
     mapping(uint256 chainId => mapping(address user => mapping(uint64 tokenId => uint256 amount))) s_depositDetailsOfUser;
 
     /// @dev Tracks loan details for each user per token
@@ -1063,6 +1065,7 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
         loan.lastUpdate = block.timestamp;
         loan.dueDate = block.timestamp + 180 days;
         loan.token = i_stableCoinAddress;
+        loan.loanChainId = block.chainid;
         loan.userBorrowIndex = chainIdentifier
             ? GSM.getBorrowerIndex(tokenId)
             : stateAggregator.getBorrowerIndex(tokenId);
