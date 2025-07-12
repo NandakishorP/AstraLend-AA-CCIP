@@ -20,6 +20,13 @@ interface ILendingPoolContract {
 
     function receiveTokensFromOneChainToOther(bytes memory data) external;
 
+    function getTokenAmountFromUsd(
+        uint64 tokenId,
+        uint256 usdValue
+    ) external view returns (uint256);
+
+    function getStableCoinAddress() external view returns (address);
+
     function getCrossChainMessageSenderAddress()
         external
         view

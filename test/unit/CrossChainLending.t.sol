@@ -92,7 +92,8 @@ contract CrossChainLending is Test {
             421614,
             3478487238524512106
         );
-        lendingPoolContractSepolia = new LendingPoolContract(
+        lendingPoolContractSepolia = new LendingPoolContract();
+        lendingPoolContractSepolia.initialize(
             tokenAddressSepolia,
             priceFeedAddressSepolia,
             chainIdSepolia,
@@ -214,7 +215,8 @@ contract CrossChainLending is Test {
             421614,
             3478487238524512106
         );
-        lendingPoolContractArbSepolia = new LendingPoolContract(
+        lendingPoolContractArbSepolia = new LendingPoolContract();
+        lendingPoolContractArbSepolia.initialize(
             tokenAddressArbSepolia,
             priceFeedAddressArbSepolia,
             chainIdArbSepolia,
@@ -225,7 +227,6 @@ contract CrossChainLending is Test {
             address(0),
             address(arbSepoliaRegistry)
         );
-
         ERC20Mock(address(stableCoinArbSepolia)).mint(
             lendingPoolContractArbSepolia.getVaultAddress(),
             10000 ether

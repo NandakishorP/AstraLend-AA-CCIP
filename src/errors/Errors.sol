@@ -81,3 +81,24 @@ library GlobalStateManagerErrors {
     error GlobalStateManager__LoanIsNotActive();
     error GlobalStateManager__NotLiquidatable();
 }
+
+library LiquidityControllerErrors {
+    error LiquidityController__AmountShouldBeGreaterThanZero();
+    error LiquidityController__InsufficentFees();
+    error LiquidityController__TransferFailed();
+    error LiquidityController__LpTokenMintFailed();
+}
+
+library CollateralControllerErrors {
+    error CollateralController__InsufficentFees();
+    error CollateralController__TransferFailed();
+    error CollateralContorller__InvalidRequestAmount();
+}
+
+library LoanControllerErrors {
+    error LoanController__AmountShouldBeGreaterThanZero();
+    error LoanController__NotEnoughCollateral();
+    error LoanController__InsufficentFees();
+    error LoanController__TransferFailed();
+    error LoanController__LoanAmountExceeded();
+}

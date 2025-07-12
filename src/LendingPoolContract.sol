@@ -13,15 +13,21 @@ import {LendingPoolContractErrors} from "./errors/Errors.sol";
 import {console} from "forge-std/console.sol";
 import {Vault} from "./Vault.sol";
 import {IVault} from "./interfaces/IVault.sol";
-import {CrossChainMessageSender} from "./ccip/CrossChainMessageSender.sol";
+import {ICrossChainMessageSender} from "./ccip/interfaces/ICrossChainMessageSender.sol";
+import {ICrossChainMessageReceiver} from "./ccip/interfaces/ICrossChainMessageReceiver.sol";
 import {CrossChainMessageReceiver} from "./ccip/CrossChainMessageReceiver.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IGlobalStateManager} from "./interfaces/IGlobalStateManager.sol";
 import {IRegistry} from "./interfaces/IRegistry.sol";
-import {StateAggregator} from "./StateMirror/StateAggregator.sol";
-import {CCIPRequestHandler} from "../src/ccip/CCIPRequestHandler.sol";
-import {CCIPReceiver} from "../src/ccip/CCIPReceiver.sol";
+import {IStateAggregator} from "./interfaces/IStateAggregator.sol";
+import {ICCIPRequestHandler} from "../src/ccip/interfaces/ICCIPRequestHandler.sol";
+import {ICCIPReceiver} from "../src/ccip/interfaces/ICCIPReceiver.sol";
 import {LoanManager} from "./GSM/LoanManager.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {ILiquidityContorller} from "../src/service/interfaces/ILiquidityController.sol";
+import {ICollateralController} from "../src/service/interfaces/ICollateralController.sol";
+import {ILoanController} from "../src/service/interfaces/ILoanController.sol";
 
 // Layout of Contract:
 // version
@@ -56,7 +62,12 @@ import {LoanManager} from "./GSM/LoanManager.sol";
 
     gethealthfactor
 */
-contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
+contract LendingPoolContract is
+    ReentrancyGuard,
+    ILendingPoolContract,
+    Initializable,
+    OwnableUpgradeable
+{
     ////////////////////
     // Using directives
     ////////////////////
@@ -109,11 +120,6 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
     mapping(address user => mapping(uint64 tokenId => LoanDetails loanDetails))
         private s_loanDetails;
 
-    /// @dev Stores the LP token balance of each user
-    /// @custom:structure mapping(user => lpTokenAmount)
-
-    mapping(address user => uint256 lpTokenAmount) private s_tokenDetailsofUser;
-
     /// @dev address of the lptoken contract
 
     address private lpToken;
@@ -156,17 +162,15 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
     mapping(bytes32 requestId => bool) private isCollateralDetailsAvailable;
     mapping(address => mapping(uint64 => uint256)) public lastNonceUsed;
 
-    CCIPRequestHandler ccipRequestHandler;
-
     ///////////////////////
     // Immutable variables
     ///////////////////////
 
     /// @dev address of the stable coin which the protocol supports
 
-    address private immutable i_stableCoinAddress;
-    uint256 ethChainId = 11155111; // for sepolia now
-    uint256 arbChainId = 421614;
+    address private i_stableCoinAddress;
+    uint256 ethChainId = 1111; // for sepolia now // replacing now with the anvil test chainId to test fuzzzing
+    uint256 arbChainId = 2222;
 
     ///////////////////
     // Constants
@@ -213,10 +217,10 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
     IVault vault;
 
     /// @notice Contract responsible for sending cross-chain messages
-    CrossChainMessageSender crossChainMessageSender;
+    ICrossChainMessageSender crossChainMessageSender;
 
     /// @notice Contract responsible for receiving cross-chain messages
-    CrossChainMessageReceiver crossChainMessageReceiver;
+    ICrossChainMessageReceiver crossChainMessageReceiver;
 
     /// @notice Address of the LINK token used for CCIP
     address linkToken;
@@ -228,10 +232,10 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
     IGlobalStateManager GSM;
 
     /// @notice CCIP receiver interface for handling incoming messages
-    CCIPReceiver ccipReceiver;
+    ICCIPReceiver ccipReceiver;
 
     /// @notice Aggregator for collecting and managing protocol state data
-    StateAggregator stateAggregator;
+    IStateAggregator stateAggregator;
 
     /// @notice Mapping to track if a given chainId is allowed for cross-chain communication
     mapping(uint64 chainId => bool isAllowed) private s_AllowedChains;
@@ -247,6 +251,7 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
         RESPONSE_SET_INITAL_PARAMS
     }
 
+    ICCIPRequestHandler ccipRequestHandler;
     /// @notice Constant string storing the receiver address for Ethereum Sepolia network
     string private constant ETH_CONTRACT_RECEIVER_ADDRESS =
         "sepoliaReceiverAddress";
@@ -254,6 +259,9 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
     /// @notice Token ID used to represent Ethereum in cross-chain context
     uint64 ethTokenId = 0;
 
+    ILiquidityContorller liquidityController;
+    ICollateralController collateralController;
+    ILoanController loanController;
     ////////////////////
     // Events
     ////////////////////
@@ -402,35 +410,32 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
         _;
     }
 
-    ////////////////////
-    // Constructor
-    ////////////////////
+    bool private initialized;
 
-    /// @dev Initializes the LendingPool contract with required configuration parameters. All parameters are immutable post-deployment.
-    /// @param tokenAddresses The list of ERC20 token addresses recognized by the contract for lending/borrowing.
-    /// @param priceFeedAddresses The corresponding Chainlink price feed addresses for each token in `tokenAddresses`.
-    /// @param chainIds The list of chain IDs that are allowed for cross-chain operations via CCIP.
-    /// @param stableCoinAddress The address of the stablecoin used in the protocol, pegged to 1 USD (1 token = 1 USD).
-    /// @param lpTokenAddress The address of the LP token contract used to reward liquidity providers.
-    /// @param link_ The address of the LINK token used for CCIP message fee payments.
-    /// @param router_ The address of the CCIP router contract for sending and receiving messages.
-    /// @param gsm The address of the Global State Manager, used on Ethereum mainnet for accessing cross-chain global state.
-    /// @param registry_ The address of the CCIP Registry contract used by the request handler and receiver.
-    /// @notice The constructor reverts if the lengths of `tokenAddresses` and `priceFeedAddresses` arrays do not match.
-    /// @notice Initializes internal mappings and components, including the Vault, CrossChainMessageSender/Receiver, CCIPReceiver, StateAggregator, and CCIPRequestHandler.
-    /// @notice Conditionally registers the Global State Manager or sets up state access depending on the chain being Ethereum or not.
-
-    constructor(
+    function initialize(
         address[] memory tokenAddresses,
         address[] memory priceFeedAddresses,
         uint64[] memory chainIds,
         address stableCoinAddress,
         address lpTokenAddress,
         address link_,
-        address router_,
         address gsm,
-        address registry_
-    ) Ownable(msg.sender) {
+        address registry_,
+        address vaultAddress,
+        address crossChainMessageSenderAddress,
+        address ccipReceiverAddress,
+        address ccipRequestHandlerAddress,
+        address stateAggregatorAddress,
+        address crossChainMessageReceiverAddress,
+        address liquidityControllerAddress,
+        address collateralControllerAddress,
+        address loanControllerAddress
+    ) public initializer {
+        require(!initialized, "Already initialized");
+        initialized = true;
+
+        __Ownable_init(msg.sender);
+
         if (tokenAddresses.length != priceFeedAddresses.length) {
             revert LendingPoolContractErrors
                 .LendingPoolContract__TokenAddressAndPriceFeedAddressMismatch(
@@ -438,6 +443,7 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
                     priceFeedAddresses.length
                 );
         }
+
         for (uint256 i = 0; i < tokenAddresses.length; i++) {
             s_lastAccuralTime[uint64(i)] = block.timestamp;
             s_priceFeed[uint64(i)] = priceFeedAddresses[i];
@@ -452,27 +458,24 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
 
         i_stableCoinAddress = stableCoinAddress;
         lpToken = lpTokenAddress;
-        vault = IVault(address(new Vault(address(this), i_stableCoinAddress)));
-        crossChainMessageSender = new CrossChainMessageSender(link_, router_);
-        linkToken = link_;
-        stateAggregator = new StateAggregator();
 
-        ccipRequestHandler = new CCIPRequestHandler(
-            address(this),
-            registry_,
-            gsm,
-            address(crossChainMessageSender)
+        vault = IVault(vaultAddress);
+        crossChainMessageSender = ICrossChainMessageSender(
+            crossChainMessageSenderAddress
         );
-        ccipReceiver = new CCIPReceiver(
-            address(this),
-            registry_,
-            address(ccipRequestHandler),
-            address(stateAggregator)
+        linkToken = link_;
+        stateAggregator = IStateAggregator(stateAggregatorAddress);
+        ccipRequestHandler = ICCIPRequestHandler(ccipRequestHandlerAddress);
+        ccipReceiver = ICCIPReceiver(ccipReceiverAddress);
+        crossChainMessageReceiver = ICrossChainMessageReceiver(
+            crossChainMessageReceiverAddress
         );
-        crossChainMessageReceiver = new CrossChainMessageReceiver(
-            router_,
-            address(ccipReceiver)
+        liquidityController = ILiquidityContorller(liquidityControllerAddress);
+        collateralController = ICollateralController(
+            collateralControllerAddress
         );
+        loanController = ILoanController(loanControllerAddress);
+
         if (block.chainid == ethChainId) {
             GSM = IGlobalStateManager(gsm);
         } else {
@@ -529,120 +532,11 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
         isTokenApprovedByTheContract(tokenId)
         nonReentrant
     {
-        //safeTraansfer function is used instead of the normal transfer,it ensures that the user has approved necessery funds for the contract
-        address tokenAddress = s_tokenAddresses[tokenId];
-        uint64 ethDestinationChainSelector = registry
-            .getDestinationChainSelector(ethChainId);
-        vault.depositLiquidity(msg.sender, tokenAddress, amount);
-        uint256 currentTotalLiquidity;
-        uint256 totalSupplyOfLpToken;
-
-        if (block.chainid == ethChainId) {
-            currentTotalLiquidity = GSM.readTotalLiquidityPerToken(tokenId);
-            totalSupplyOfLpToken = GSM.getTotalLpTokensInCirculation();
-        } else {
-            currentTotalLiquidity = stateAggregator.readTotalLiquidityPerToken(
-                tokenId
-            );
-            totalSupplyOfLpToken = stateAggregator
-                .getTotalLpTokensInCirculation();
-        }
-        uint256 amountOfLpTokensToMint;
-        if (totalSupplyOfLpToken == 0 || currentTotalLiquidity == amount) {
-            if (tokenId == ethTokenId) {
-                amountOfLpTokensToMint = amount;
-            } else {
-                uint256 ethInUsd = getUsdValue(ethTokenId, 1);
-
-                uint256 arbInUsd = getUsdValue(tokenId, 1);
-                amountOfLpTokensToMint = (ethInUsd / arbInUsd) * (amount);
-            }
-        } else {
-            if (tokenId == ethTokenId) {
-                amountOfLpTokensToMint =
-                    (amount * totalSupplyOfLpToken) /
-                    currentTotalLiquidity;
-            } else {
-                uint256 ethInUsd = getUsdValue(ethTokenId, 1);
-
-                uint256 arbInUsd = getUsdValue(tokenId, 1);
-
-                amountOfLpTokensToMint =
-                    (ethInUsd / arbInUsd) *
-                    ((amount * totalSupplyOfLpToken) / currentTotalLiquidity);
-            }
-        }
-        _mintLpTokens(msg.sender, amountOfLpTokensToMint);
-        if (block.chainid == ethChainId) {
-            GSM.updateDepositDetailsOfUser(
-                block.chainid,
-                msg.sender,
-                tokenId,
-                amount
-            );
-            GSM.updateLPTokenInCirculation(
-                block.chainid,
-                msg.sender,
-                amountOfLpTokensToMint
-            );
-            uint64 arbDestinationChainSelector = registry
-                .getDestinationChainSelector(arbChainId);
-            address arbCrossChainReceiverAddress = registry
-                .getCrossChainAddress(
-                    arbDestinationChainSelector,
-                    "crossChainMessageReceiverAddress"
-                );
-
-            GSM.mirrorUpdateOfTheUserDeposit(
-                arbCrossChainReceiverAddress,
-                block.chainid,
-                msg.sender,
-                tokenId,
-                arbDestinationChainSelector
-            );
-        } else {
-            address receiver = registry.getCrossChainAddress(
-                ethDestinationChainSelector,
-                "crossChainMessageReceiverAddress"
-            );
-            bytes memory data = abi.encode(
-                ACTION_COMMUNICATION_ID,
-                CrossChainPayLoad({
-                    actionType: ActionType.DEPOSIT_LIQUIDITY,
-                    chainId: block.chainid,
-                    user: msg.sender,
-                    crossChaintokenId: tokenId,
-                    amountToTransfer: amount,
-                    messageToTransfer: "",
-                    extraInformation: abi.encode(amountOfLpTokensToMint)
-                })
-            );
-            uint256 fees = crossChainMessageSender.getFee(
-                receiver,
-                data,
-                ethDestinationChainSelector,
-                address(0),
-                0,
-                false
-            );
-            if (msg.value < fees) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__InsufficentFees();
-            }
-            (bool success, ) = payable(crossChainMessageSender).call{
-                value: fees
-            }("");
-            if (!success) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__TransferFailed();
-            }
-            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
-        }
-        emit LiquidityDeposited(
+        liquidityController.depositController(
+            s_tokenAddresses[tokenId],
+            tokenId,
             msg.sender,
-            tokenAddress,
-            amount,
-            amountOfLpTokensToMint
+            amount
         );
     }
 
@@ -705,73 +599,12 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
         isChainAllowed(uint64(block.chainid))
         nonReentrant
     {
-        uint64 ethDestinationChainSelector = registry
-            .getDestinationChainSelector(ethChainId);
-        address tokenAddress = s_tokenAddresses[tokenId];
-        vault.depositCollateral(msg.sender, tokenAddress, amount);
-
-        if (ethChainId == block.chainid) {
-            GSM.updateDepositCollateralOfUser(
-                block.chainid,
-                msg.sender,
-                tokenId,
-                amount
-            );
-            uint64 arbDestinationChainSelector = registry
-                .getDestinationChainSelector(arbChainId);
-            address arbCrossChainReceiverAddress = registry
-                .getCrossChainAddress(
-                    arbDestinationChainSelector,
-                    "crossChainMessageReceiverAddress"
-                );
-
-            GSM.mirrorUpdateOfTheUserCollateral(
-                arbCrossChainReceiverAddress,
-                block.chainid,
-                msg.sender,
-                tokenId,
-                arbDestinationChainSelector
-            );
-        } else {
-            address receiver = registry.getCrossChainAddress(
-                ethDestinationChainSelector,
-                "crossChainMessageReceiverAddress"
-            );
-            bytes memory data = abi.encode(
-                ACTION_COMMUNICATION_ID,
-                CrossChainPayLoad({
-                    actionType: ActionType.DEPOSIT_COLLATERAL,
-                    chainId: block.chainid,
-                    user: msg.sender,
-                    crossChaintokenId: tokenId,
-                    amountToTransfer: amount,
-                    messageToTransfer: "",
-                    extraInformation: ""
-                })
-            );
-            uint256 fees = crossChainMessageSender.getFee(
-                receiver,
-                data,
-                ethDestinationChainSelector,
-                address(0),
-                0,
-                false
-            );
-            if (msg.value < fees) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__InsufficentFees();
-            }
-            (bool success, ) = payable(crossChainMessageSender).call{
-                value: fees
-            }("");
-            if (!success) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__TransferFailed();
-            }
-            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
-        }
-
-        emit CollateralDeposited(msg.sender, tokenAddress, amount);
+        collateralController.depositCollateral(
+            s_tokenAddresses[tokenId],
+            tokenId,
+            msg.sender,
+            amount
+        );
     }
 
     /**
@@ -788,16 +621,14 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
         address user,
         uint64 tokenId
     ) external view returns (uint256) {
-        if (block.chainid == ethChainId) {
-            return GSM.getUserCollateralDetails(chainId, user, tokenId);
-        } else {
-            return
-                stateAggregator.readCollateralDetailsOfUser(
+        return
+            block.chainid == ethChainId
+                ? GSM.getUserCollateralDetails(chainId, user, tokenId)
+                : stateAggregator.readCollateralDetailsOfUser(
                     chainId,
                     user,
                     tokenId
                 );
-        }
     }
 
     /**
@@ -824,7 +655,6 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
      */
 
     function withdrawDeposit(
-        uint256 chainId,
         uint64 tokenId,
         uint256 amount
     )
@@ -834,83 +664,12 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
         isTokenApprovedByTheContract(tokenId)
         nonReentrant
     {
-        address tokenAddress = s_tokenAddresses[tokenId];
-        uint256 depositAmount = block.chainid == ethChainId
-            ? GSM.readDepositDetailsOfUser(chainId, msg.sender, tokenId)
-            : stateAggregator.readDepositDetailsOfUser(
-                chainId,
-                msg.sender,
-                tokenId
-            );
-        if (depositAmount < amount) {
-            revert LendingPoolContractErrors
-                .LendingPoolContract__InsufficentBalance(amount, depositAmount);
-        }
-        uint256 balanceAmount = depositAmount - amount;
-        if (block.chainid == ethChainId) {
-            GSM.updateWithDrawDetailsOfUser(
-                chainId,
-                msg.sender,
-                tokenId,
-                balanceAmount
-            );
-            uint64 arbDestinationChainSelector = registry
-                .getDestinationChainSelector(arbChainId);
-            address arbCrossChainReceiverAddress = registry
-                .getCrossChainAddress(
-                    arbDestinationChainSelector,
-                    "crossChainMessageReceiverAddress"
-                );
-
-            GSM.mirrorUpdateOfTheUserDeposit(
-                arbCrossChainReceiverAddress,
-                block.chainid,
-                msg.sender,
-                tokenId,
-                arbDestinationChainSelector
-            );
-        } else {
-            uint64 ethDestinationChainSelector = registry
-                .getDestinationChainSelector(ethChainId);
-            address receiver = registry.getCrossChainAddress(
-                ethDestinationChainSelector,
-                "crossChainMessageReceiverAddress"
-            );
-            bytes memory data = abi.encode(
-                ACTION_COMMUNICATION_ID,
-                CrossChainPayLoad({
-                    actionType: ActionType.WITHDRAW_LIQUIDITY,
-                    chainId: block.chainid,
-                    user: msg.sender,
-                    crossChaintokenId: tokenId,
-                    amountToTransfer: amount,
-                    messageToTransfer: "",
-                    extraInformation: ""
-                })
-            );
-            uint256 fees = crossChainMessageSender.getFee(
-                receiver,
-                data,
-                ethDestinationChainSelector,
-                address(0),
-                0,
-                false
-            );
-            if (msg.value < fees) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__InsufficentFees();
-            }
-            (bool success, ) = payable(crossChainMessageSender).call{
-                value: fees
-            }("");
-            if (!success) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__TransferFailed();
-            }
-            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
-        }
-        vault.withdrawDeposit(msg.sender, tokenAddress, amount);
-        emit DepositWithdrawn(msg.sender, tokenAddress, amount);
+        liquidityController.withDrawController(
+            s_tokenAddresses[tokenId],
+            msg.sender,
+            tokenId,
+            amount
+        );
     }
 
     /**
@@ -927,6 +686,8 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
      * Errors:
      * - `LendingPoolContract__InsufficentLpTokenBalance` if the sender's balance is less than the specified amount.
      */
+
+    // here the reward is not getting transfered to the user before burning and it need to be addressed
 
     function burn(uint256 amount) external isGreaterThanZero(amount) {
         uint256 balance = ILpToken(lpToken).balanceOf(msg.sender);
@@ -1008,140 +769,13 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
         isChainAllowed(uint64(block.chainid))
         nonReentrant
     {
-        address tokenAddress = s_tokenAddresses[tokenId];
-
-        bool chainIdentifier = block.chainid == ethChainId;
-
-        uint256 depositedCollateral = chainIdentifier
-            ? GSM.getUserCollateralDetails(
-                collateralChainId,
-                msg.sender,
-                tokenId
-            )
-            : stateAggregator.readCollateralDetailsOfUser(
-                collateralChainId,
-                msg.sender,
-                tokenId
-            );
-
-        // Calculate the amount of collateral available for lending, considering the LTV ratio
-        uint256 collateralAvailableForLending = (depositedCollateral * LTV) /
-            PRECISION;
-        uint256 collateralAvailableForLendingInUsd = getUsdValue(
-            tokenId,
-            collateralAvailableForLending
-        );
-        if (amount > collateralAvailableForLendingInUsd) {
-            revert LendingPoolContractErrors
-                .LendingPoolContract__NotEnoughCollateral();
-        }
-        // TODO: change the arrays logic to the eth chain when the liquidation is geting handled in the state manager and just leave it for now
-        totalBorrowed += amount;
-        // TODO: This need to be addressed as well
-        s_amountBorrowedInToken[tokenId] += getTokenAmountFromUsd(
+        loanController.borrowLoanController(
+            msg.sender,
+            s_tokenAddresses[tokenId],
+            collateralChainId,
             tokenId,
             amount
         );
-
-        uint256 loanId = chainIdentifier
-            ? GSM.readNumberOfLoanTakenPerToken(
-                block.chainid,
-                msg.sender,
-                tokenId
-            )
-            : stateAggregator.readNumberOfLoanTakenPerToken(
-                block.chainid,
-                msg.sender,
-                tokenId
-            );
-
-        LoanManager.LoanDetails memory loan;
-        // Update the loan details: amount borrowed, collateral used, last update, and due date
-        loan.amountBorrowedInUSDT += amount;
-        loan.principalAmount += amount;
-        loan.asset = tokenAddress;
-        loan.collateralChainId = collateralChainId;
-        loan.collateralUsed = getTokenAmountFromUsd(tokenId, amount);
-        loan.lastUpdate = block.timestamp;
-        loan.dueDate = block.timestamp + 180 days;
-        loan.token = i_stableCoinAddress;
-        loan.loanChainId = block.chainid;
-        loan.userBorrowIndex = chainIdentifier
-            ? GSM.getBorrowerIndex(tokenId)
-            : stateAggregator.getBorrowerIndex(tokenId);
-        loan.loanId = ++loanId;
-
-        if (chainIdentifier) {
-            GSM.updateBorrowLoanDetailsOfUser(
-                block.chainid,
-                msg.sender,
-                tokenId,
-                loan
-            );
-            uint64 arbDestinationChainSelector = registry
-                .getDestinationChainSelector(arbChainId);
-            address arbCrossChainReceiverAddress = registry
-                .getCrossChainAddress(
-                    arbDestinationChainSelector,
-                    "crossChainMessageReceiverAddress"
-                );
-            GSM.mirrorUpdateOfTheUserLoan(
-                arbCrossChainReceiverAddress,
-                block.chainid,
-                msg.sender,
-                tokenId,
-                loan.loanId,
-                arbDestinationChainSelector
-            );
-        } else {
-            uint64 ethDestinationChainSelector = registry
-                .getDestinationChainSelector(ethChainId);
-            console.log(
-                "eth desselector from repayLoan",
-                ethDestinationChainSelector
-            );
-            address receiver = registry.getCrossChainAddress(
-                ethDestinationChainSelector,
-                "crossChainMessageReceiverAddress"
-            );
-            console.log("address cross chain from repayLoan", receiver);
-
-            bytes memory extraInf = abi.encode(loan);
-            bytes memory data = abi.encode(
-                ACTION_COMMUNICATION_ID,
-                CrossChainPayLoad({
-                    actionType: ActionType.LOAN_TAKEN,
-                    chainId: block.chainid,
-                    user: msg.sender,
-                    crossChaintokenId: tokenId,
-                    amountToTransfer: 0,
-                    messageToTransfer: "",
-                    extraInformation: extraInf
-                })
-            );
-            uint256 fees = crossChainMessageSender.getFee(
-                receiver,
-                data,
-                ethDestinationChainSelector,
-                address(0),
-                0,
-                false
-            );
-            if (msg.value < fees) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__InsufficentFees();
-            }
-            (bool success, ) = payable(crossChainMessageSender).call{
-                value: fees
-            }("");
-            if (!success) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__TransferFailed();
-            }
-            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
-        }
-        vault.transferLoanAmount(msg.sender, amount);
-        emit LoanBorrowed(msg.sender, tokenAddress, loan, amount);
     }
 
     /**
@@ -1208,143 +842,13 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
         isGreaterThanZero(amount)
         nonReentrant
     {
-        address tokenAddress = s_tokenAddresses[tokenId];
-
-        bool chainIdentififer = block.chainid == ethChainId;
-        LoanManager.LoanDetails memory loan = chainIdentififer
-            ? GSM.readLoanDetailsOfUser(
-                loanChainId,
-                msg.sender,
-                tokenId,
-                loanId
-            )
-            : stateAggregator.readLoanDetailsOfUser(
-                loanChainId,
-                msg.sender,
-                tokenId,
-                loanId
-            );
-        uint256 principalLoanAmount = loan.amountBorrowedInUSDT;
-        uint256 userBorrowIndex = loan.userBorrowIndex;
-        uint256 scaledLoanAmount = (principalLoanAmount *
-            (
-                chainIdentififer
-                    ? GSM.getBorrowerIndex(tokenId)
-                    : stateAggregator.getBorrowerIndex(tokenId)
-            )) / userBorrowIndex;
-        uint256 interestAccrued = scaledLoanAmount - principalLoanAmount;
-        uint256 interestPaidNow = 0;
-        uint256 principalRepaid = 0;
-        if (amount > scaledLoanAmount) {
-            revert LendingPoolContractErrors
-                .LendingPoolContract__LoanAmountExceeded();
-        }
-
-        vault.claimLoan(msg.sender, amount);
-        if (amount <= interestAccrued) {
-            // Entire repayment goes to pay interest only
-            interestPaidNow = amount;
-            // Loan remains with the same principal but less interest
-            scaledLoanAmount =
-                loan.amountBorrowedInUSDT +
-                (interestAccrued - interestPaidNow);
-        } else {
-            // Repays full interest and some (or all) principal
-            interestPaidNow = interestAccrued;
-            principalRepaid = amount - interestPaidNow;
-            // Update the new loan amount after principal repayment
-            scaledLoanAmount = loan.amountBorrowedInUSDT - principalRepaid;
-        }
-
-        loan.amountBorrowedInUSDT = scaledLoanAmount;
-        loan.interestPaid += interestPaidNow;
-        // modify this part to update the collateral of the user in the gsm and arrange it to release the collateral from the chain
-        if (loan.amountBorrowedInUSDT != 0) {
-            loan.lastUpdate = block.timestamp;
-            loan.userBorrowIndex = (
-                chainIdentififer
-                    ? GSM.getBorrowerIndex(tokenId)
-                    : stateAggregator.getBorrowerIndex(tokenId)
-            );
-        } else {
-            loan.isClosed = true;
-        }
-        if (chainIdentififer) {
-            GSM.repayLoanDetailsOfUser(loanChainId, msg.sender, tokenId, loan);
-            uint64 destinationChainSelector = registry
-                .getDestinationChainSelector(421614);
-
-            address receiver = registry.getCrossChainAddress(
-                destinationChainSelector,
-                "crossChainMessageReceiverAddress"
-            );
-
-            GSM.mirrorUpdateOfTheUserLoan(
-                receiver,
-                loanChainId,
-                msg.sender,
-                tokenId,
-                loan.loanId,
-                destinationChainSelector
-            );
-        } else {
-            uint64 ethDestinationChainSelector = registry
-                .getDestinationChainSelector(ethChainId);
-
-            address receiver = registry.getCrossChainAddress(
-                ethDestinationChainSelector,
-                "crossChainMessageReceiverAddress"
-            );
-            bytes memory extraInf = abi.encode(loan);
-            bytes memory data = abi.encode(
-                ACTION_COMMUNICATION_ID,
-                CrossChainPayLoad({
-                    actionType: ActionType.LOAN_REPAYMENT,
-                    chainId: block.chainid,
-                    user: msg.sender,
-                    crossChaintokenId: tokenId,
-                    amountToTransfer: 0,
-                    messageToTransfer: "",
-                    extraInformation: extraInf
-                })
-            );
-            uint256 fees;
-            try
-                crossChainMessageSender.getFee(
-                    receiver,
-                    data,
-                    ethDestinationChainSelector,
-                    address(0),
-                    0,
-                    false
-                )
-            returns (uint256 fees_) {
-                fees = fees_;
-            } catch Error(string memory reason) {
-                revert(string(abi.encodePacked("getFee failed: ", reason)));
-            } catch {
-                revert("getFee failed: unknown reason");
-            }
-
-            if (msg.value < fees) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__InsufficentFees();
-            }
-            (bool success, ) = payable(crossChainMessageSender).call{
-                value: fees
-            }("");
-            if (!success) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__TransferFailed();
-            }
-            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
-        }
-        emit LoanRepaid(
+        loanController.repayLoanController(
             msg.sender,
-            tokenAddress,
+            s_tokenAddresses[tokenId],
+            loanChainId,
+            tokenId,
             amount,
-            interestPaidNow,
-            principalRepaid
+            loanId
         );
     }
 
@@ -1367,86 +871,10 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
         isGreaterThanZero(amount)
         nonReentrant
     {
-        bool chainIdentifier = block.chainid == ethChainId;
-        uint256 collateralAmount = chainIdentifier
-            ? GSM.getUserCollateralDetails(block.chainid, msg.sender, tokenId)
-            : stateAggregator.readCollateralDetailsOfUser(
-                block.chainid,
-                msg.sender,
-                tokenId
-            );
-        if (collateralAmount < amount) {
-            revert LendingPoolContractErrors
-                .LendingPoolContract__InvalidRequestAmount();
-        }
-        // s_collateralDetails[msg.sender][tokenId] -= amount;
-        // s_tokenCollateral[tokenId] -= amount;
-        if (chainIdentifier) {
-            GSM.updateWithdrawCollateralOfUser(
-                block.chainid,
-                msg.sender,
-                tokenId,
-                amount
-            );
-            uint64 arbDestinationChainSelector = registry
-                .getDestinationChainSelector(arbChainId);
-            address arbCrossChainReceiverAddress = registry
-                .getCrossChainAddress(
-                    arbDestinationChainSelector,
-                    "crossChainMessageReceiverAddress"
-                );
-
-            GSM.mirrorUpdateOfTheUserCollateral(
-                arbCrossChainReceiverAddress,
-                block.chainid,
-                msg.sender,
-                tokenId,
-                arbDestinationChainSelector
-            );
-        } else {
-            uint64 ethDestinationChainSelector = registry
-                .getDestinationChainSelector(ethChainId);
-            address receiver = registry.getCrossChainAddress(
-                ethDestinationChainSelector,
-                "crossChainMessageReceiverAddress"
-            );
-            bytes memory data = abi.encode(
-                ACTION_COMMUNICATION_ID,
-                CrossChainPayLoad({
-                    actionType: ActionType.WITHDRAW_COLLATERAL,
-                    chainId: block.chainid,
-                    user: msg.sender,
-                    crossChaintokenId: tokenId,
-                    amountToTransfer: amount,
-                    messageToTransfer: "",
-                    extraInformation: ""
-                })
-            );
-            uint256 fees = crossChainMessageSender.getFee(
-                receiver,
-                data,
-                ethDestinationChainSelector,
-                address(0),
-                amount,
-                false
-            );
-            if (msg.value < fees) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__InsufficentFees();
-            }
-            (bool success, ) = payable(crossChainMessageSender).call{
-                value: fees
-            }("");
-            if (!success) {
-                revert LendingPoolContractErrors
-                    .LendingPoolContract__TransferFailed();
-            }
-            sendCCIPMessage(0, receiver, ethDestinationChainSelector, data);
-        }
-        vault.transferCollateral(msg.sender, s_tokenAddresses[tokenId], amount);
-        emit CollateralWithdrawed(
+        collateralController.withDrawCollateralController(
             msg.sender,
             s_tokenAddresses[tokenId],
+            tokenId,
             amount
         );
     }
@@ -1456,34 +884,6 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
     ////////////////////
     // Internal
     ////////////////////
-
-    /**
-     * @notice Mints LP tokens to a specified address based on the provided amount.
-     * @dev This internal function ensures that the minting amount is greater than zero using the `isGreaterThanZero` modifier.
-     *      It attempts to mint LP tokens using the `ILpToken(lpToken).mint` function. If the minting fails, it reverts with
-     *      the `LendingPoolContract__LpTokenMintFailed` error.
-     *      Additionally, it updates the user's LP token balance in `tokenDetailsofUser`.
-     *
-     * @param to The address that will receive the minted LP tokens.
-     * @param amountToMint The amount of LP tokens to mint.
-     *
-     * @custom:requirements
-     * - `amountToMint` must be greater than zero.
-     * - The LP token minting function must succeed.
-     *
-     * @custom:reverts
-     * - `LendingPoolContract__LpTokenMintFailed` if the minting process fails.
-     */
-    function _mintLpTokens(
-        address to,
-        uint256 amountToMint
-    ) internal isGreaterThanZero(amountToMint) {
-        if (!ILpToken(lpToken).mint(to, amountToMint)) {
-            revert LendingPoolContractErrors
-                .LendingPoolContract__LpTokenMintFailed();
-        }
-        s_tokenDetailsofUser[to] += amountToMint;
-    }
 
     /**
      * @notice Burns a specified amount of LP tokens from a user's balance.
@@ -1503,7 +903,6 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
 
     function _burnLpTokens(address user, uint256 amount) internal {
         ILpToken(lpToken).burn(user, amount);
-        s_tokenDetailsofUser[user] -= amount;
     }
 
     ///////////////////
@@ -1892,7 +1291,7 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
                     .LendingPoolContract__InsufficentFees();
             }
 
-            (bool success, ) = payable(crossChainMessageSender).call{
+            (bool success, ) = payable(address(crossChainMessageSender)).call{
                 value: fees
             }("");
             if (!success) {
@@ -2249,6 +1648,10 @@ contract LendingPoolContract is ReentrancyGuard, ILendingPoolContract, Ownable {
                         : stateAggregator.getBorrowerIndex(tokenId)
                 )) /
             userBorrowIndex;
+    }
+
+    function getStableCoinAddress() external view returns (address) {
+        return i_stableCoinAddress;
     }
 
     receive() external payable {}

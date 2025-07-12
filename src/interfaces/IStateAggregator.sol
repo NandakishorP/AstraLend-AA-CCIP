@@ -80,6 +80,10 @@ interface IStateAggregator {
         uint256 amount
     ) external;
 
+    function setAuthorizedReadors(address caller, bool status) external;
+
+    function setAuthorizedUpdators(address caller, bool status) external;
+
     function updateTotalLpTokensInAChain(
         uint256 chainId,
         uint256 amount
@@ -90,4 +94,11 @@ interface IStateAggregator {
     function updateBorrowerIndex(uint64 tokenId, uint256 value) external;
 
     function getBorrowerIndex(uint64 tokenId) external view returns (uint256);
+
+    function readLoanDetailsOfUser(
+        uint256 chainId,
+        address user,
+        uint64 tokenId,
+        uint256 loanId
+    ) external view returns (LoanManager.LoanDetails memory);
 }

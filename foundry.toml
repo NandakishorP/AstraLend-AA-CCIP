@@ -2,10 +2,15 @@
 src = "src"
 out = "out"
 libs = ["lib"]
-rpc_endpoints = { eth = "https://eth-sepolia.g.alchemy.com/v2/tBB8RGqhj5jDY_HavrsouAD9KmayCNkd", arb = "https://arb-sepolia.g.alchemy.com/v2/tBB8RGqhj5jDY_HavrsouAD9KmayCNkd"}
-gas_limit = "1000000000"  
+# rpc_endpoints = { eth = "https://eth-sepolia.g.alchemy.com/v2/tBB8RGqhj5jDY_HavrsouAD9KmayCNkd", arb = "https://arb-sepolia.g.alchemy.com/v2/tBB8RGqhj5jDY_HavrsouAD9KmayCNkd"}
+
+rpc_endpoints = { chainA = "http://localhost:8545", chainB = "http://localhost:8546"}
+optimizer = true
+optimizer_runs = 200
+gas_limit = "10000000000"  
 remappings = [
     '@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts',
+    '@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts',
     '@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts',
     '@ccip/=lib/ccip/',
     '@chainlink/local/=lib/chainlink-local/'

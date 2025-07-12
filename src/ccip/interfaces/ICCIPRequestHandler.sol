@@ -64,4 +64,6 @@ interface ICCIPRequestHandler {
         uint64 tokenId,
         uint256 amount
     ) external;
+
+    function setGSMAddress(address gsm) external;
 }

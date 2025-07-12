@@ -47,8 +47,8 @@ contract HelperConfig is Script {
         anvilNetworkConfig = NetworkConfig({
             wethPriceFeedAddress: address(ethUsdPriceFeedAddress),
             wbtcPriceFeedAddress: address(btcUsdPriceFeedAddress),
-            wbtc: address(wbtc),
             weth: address(weth),
+            wbtc: address(wbtc),
             deployerKey: DEFAULT_ANVIL_KEY
         });
     }
