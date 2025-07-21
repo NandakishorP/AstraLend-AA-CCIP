@@ -301,13 +301,16 @@ contract LiquidityController is Ownable, ILiquidityContorller {
                 revert LiquidityControllerErrors
                     .LiquidityController__InsufficentFees();
             }
+
             (bool success, ) = payable(address(crossChainMessageSender)).call{
                 value: fees
             }("");
+
             if (!success) {
                 revert LiquidityControllerErrors
                     .LiquidityController__TransferFailed();
             }
+
             ICrossChainMessageSender(crossChainMessageSender)
                 .sendViaNativeToken(
                     receiver,
@@ -317,7 +320,9 @@ contract LiquidityController is Ownable, ILiquidityContorller {
                     amount
                 );
         }
+
         vault.withdrawDeposit(user, tokenAddress, amount);
+
         emit LendingPoolContract.DepositWithdrawn(user, tokenAddress, amount);
     }
 }

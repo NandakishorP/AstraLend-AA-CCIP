@@ -169,8 +169,8 @@ contract LendingPoolContract is
     /// @dev address of the stable coin which the protocol supports
 
     address private i_stableCoinAddress;
-    uint256 ethChainId = 1111; // for sepolia now // replacing now with the anvil test chainId to test fuzzzing
-    uint256 arbChainId = 2222;
+    uint256 ethChainId = 11155111; // for sepolia now // replacing now with the anvil test chainId to test fuzzzing
+    uint256 arbChainId = 421614;
 
     ///////////////////
     // Constants
@@ -475,7 +475,7 @@ contract LendingPoolContract is
             collateralControllerAddress
         );
         loanController = ILoanController(loanControllerAddress);
-
+        console.log("reached here");
         if (block.chainid == ethChainId) {
             GSM = IGlobalStateManager(gsm);
         } else {
@@ -532,7 +532,7 @@ contract LendingPoolContract is
         isTokenApprovedByTheContract(tokenId)
         nonReentrant
     {
-        liquidityController.depositController(
+        liquidityController.depositController{value: msg.value}(
             s_tokenAddresses[tokenId],
             tokenId,
             msg.sender,
@@ -599,7 +599,7 @@ contract LendingPoolContract is
         isChainAllowed(uint64(block.chainid))
         nonReentrant
     {
-        collateralController.depositCollateral(
+        collateralController.depositCollateral{value: msg.value}(
             s_tokenAddresses[tokenId],
             tokenId,
             msg.sender,
@@ -769,7 +769,7 @@ contract LendingPoolContract is
         isChainAllowed(uint64(block.chainid))
         nonReentrant
     {
-        loanController.borrowLoanController(
+        loanController.borrowLoanController{value: msg.value}(
             msg.sender,
             s_tokenAddresses[tokenId],
             collateralChainId,
@@ -842,7 +842,7 @@ contract LendingPoolContract is
         isGreaterThanZero(amount)
         nonReentrant
     {
-        loanController.repayLoanController(
+        loanController.repayLoanController{value: msg.value}(
             msg.sender,
             s_tokenAddresses[tokenId],
             loanChainId,
@@ -871,7 +871,7 @@ contract LendingPoolContract is
         isGreaterThanZero(amount)
         nonReentrant
     {
-        collateralController.withDrawCollateralController(
+        collateralController.withDrawCollateralController{value: msg.value}(
             msg.sender,
             s_tokenAddresses[tokenId],
             tokenId,
@@ -1564,6 +1564,7 @@ contract LendingPoolContract is
      * - This is a private utility function intended to abstract out repeated CCIP logic.
      * - If tokens are being transferred along with data, consider using the token address instead of `address(0)`.
      */
+
     function sendCCIPMessage(
         uint256 amount,
         address receiver,

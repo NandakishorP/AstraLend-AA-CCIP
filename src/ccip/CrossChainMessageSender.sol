@@ -198,7 +198,7 @@ contract CrossChainMessageSender is Ownable {
         address _token,
         uint256 _amount,
         bool isLink
-    ) external view onlyOwner returns (uint256 fees) {
+    ) external view returns (uint256 fees) {
         Client.EVMTokenAmount[] memory tokenAmounts;
         if (_amount > 0 && _token != address(0)) {
             tokenAmounts = new Client.EVMTokenAmount[](1);

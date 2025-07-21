@@ -12,7 +12,7 @@ import {CollateralControllerErrors} from "../errors/Errors.sol";
 import {IStateAggregator} from "../interfaces/IStateAggregator.sol";
 import {ICollateralController} from "./interfaces/ICollateralController.sol";
 
-contract CollateralContorller is Ownable, ICollateralController {
+contract CollateralController is Ownable, ICollateralController {
     IRegistry registry;
     IVault vault;
     ILendingPoolContract lendingPoolContract;
@@ -75,10 +75,12 @@ contract CollateralContorller is Ownable, ICollateralController {
                 block.chainid,
                 "crossChainMessageSenderAddress"
             );
+
             address receiver = registry.getCrossChainAddress(
                 ethDestinationChainSelector,
                 "crossChainMessageReceiverAddress"
             );
+
             bytes memory data = abi.encode(
                 lendingPoolContract.getActionCommunicationId(),
                 LendingPoolContract.CrossChainPayLoad({
@@ -93,6 +95,7 @@ contract CollateralContorller is Ownable, ICollateralController {
                     extraInformation: ""
                 })
             );
+
             uint256 fees = ICrossChainMessageSender(crossChainMessageSender)
                 .getFee(
                     receiver,
@@ -102,17 +105,21 @@ contract CollateralContorller is Ownable, ICollateralController {
                     0,
                     false
                 );
+
             if (msg.value < fees) {
                 revert CollateralControllerErrors
                     .CollateralController__InsufficentFees();
             }
+
             (bool success, ) = payable(address(crossChainMessageSender)).call{
                 value: fees
             }("");
+
             if (!success) {
                 revert CollateralControllerErrors
                     .CollateralController__TransferFailed();
             }
+
             ICrossChainMessageSender(crossChainMessageSender)
                 .sendViaNativeToken(
                     receiver,
@@ -137,6 +144,7 @@ contract CollateralContorller is Ownable, ICollateralController {
         uint256 amount
     ) external payable {
         bool chainIdentifier = block.chainid == ethChainId;
+
         uint256 collateralAmount = chainIdentifier
             ? GSM.getUserCollateralDetails(block.chainid, user, tokenId)
             : stateAggregator.readCollateralDetailsOfUser(
@@ -144,6 +152,7 @@ contract CollateralContorller is Ownable, ICollateralController {
                 user,
                 tokenId
             );
+
         if (collateralAmount < amount) {
             revert CollateralControllerErrors
                 .CollateralContorller__InvalidRequestAmount();
@@ -156,8 +165,10 @@ contract CollateralContorller is Ownable, ICollateralController {
                 tokenId,
                 amount
             );
+
             uint64 arbDestinationChainSelector = registry
                 .getDestinationChainSelector(arbChainId);
+
             address arbCrossChainReceiverAddress = registry
                 .getCrossChainAddress(
                     arbDestinationChainSelector,
@@ -174,10 +185,12 @@ contract CollateralContorller is Ownable, ICollateralController {
         } else {
             uint64 ethDestinationChainSelector = registry
                 .getDestinationChainSelector(ethChainId);
+
             address receiver = registry.getCrossChainAddress(
                 ethDestinationChainSelector,
                 "crossChainMessageReceiverAddress"
             );
+
             bytes memory data = abi.encode(
                 lendingPoolContract.getActionCommunicationId(),
                 LendingPoolContract.CrossChainPayLoad({
@@ -197,6 +210,7 @@ contract CollateralContorller is Ownable, ICollateralController {
                 block.chainid,
                 "crossChainMessageSenderAddress"
             );
+
             uint256 fees = ICrossChainMessageSender(crossChainMessageSender)
                 .getFee(
                     receiver,
@@ -206,17 +220,21 @@ contract CollateralContorller is Ownable, ICollateralController {
                     amount,
                     false
                 );
+
             if (msg.value < fees) {
                 revert CollateralControllerErrors
                     .CollateralController__InsufficentFees();
             }
+
             (bool success, ) = payable(address(crossChainMessageSender)).call{
                 value: fees
             }("");
+
             if (!success) {
                 revert CollateralControllerErrors
                     .CollateralController__TransferFailed();
             }
+
             ICrossChainMessageSender(crossChainMessageSender)
                 .sendViaNativeToken(
                     receiver,
@@ -226,7 +244,9 @@ contract CollateralContorller is Ownable, ICollateralController {
                     amount
                 );
         }
+
         vault.transferCollateral(user, tokenAddress, amount);
+
         emit LendingPoolContract.CollateralWithdrawed(
             user,
             tokenAddress,

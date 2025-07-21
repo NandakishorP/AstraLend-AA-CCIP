@@ -131,7 +131,9 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
 
     modifier isChainRegesitedToCall() {
         if (!s_isAllowedToCall[msg.sender]) {
-            revert GlobalStateManagerErrors.GlobalStateManager__InvalidSender();
+            revert GlobalStateManagerErrors.GlobalStateManager__InvalidSender(
+                msg.sender
+            );
         }
         _;
     }

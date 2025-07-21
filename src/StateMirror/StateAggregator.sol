@@ -70,8 +70,11 @@ contract StateAggregator is Ownable {
 
     constructor() Ownable(msg.sender) {
         collateralStateMirror = new CollateralStateMirror();
+
         loanStateMirror = new LoanStateMirror();
+
         depositStateMirror = new DepositStateMirror();
+
         lpTokenStateMirror = new LPTokenStateMirror();
     }
 

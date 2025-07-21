@@ -77,7 +77,7 @@ library CrossChainMessageSenderErrors {
 }
 
 library GlobalStateManagerErrors {
-    error GlobalStateManager__InvalidSender();
+    error GlobalStateManager__InvalidSender(address sender);
     error GlobalStateManager__LoanIsNotActive();
     error GlobalStateManager__NotLiquidatable();
 }

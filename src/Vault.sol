@@ -27,16 +27,22 @@ import {console} from "forge-std/console.sol";
  * @custom:note Uses OpenZeppelin's SafeERC20 for secure token transfers.
  * @custom:error VaultErrors for paused state and unauthorized access.
  */
+
 contract Vault is ReentrancyGuard, Ownable {
     ILendingPoolContract private lendingPoolContract;
     using SafeERC20 for IERC20;
     address stableCoin;
     bool private paused;
 
+    mapping(address => bool) isAuthorized;
+
+    error Vault__InvalidAddress();
+
     constructor(
         address lendingPoolContract_,
         address stableCoinAddress_
-    ) Ownable(lendingPoolContract_) {
+    ) Ownable(msg.sender) {
+        isAuthorized[lendingPoolContract_] = true;
         lendingPoolContract = ILendingPoolContract(lendingPoolContract_);
         stableCoin = stableCoinAddress_;
     }
@@ -48,18 +54,31 @@ contract Vault is ReentrancyGuard, Ownable {
         _;
     }
 
-    modifier onlyLendingPool() {
-        if (msg.sender != address(lendingPoolContract)) {
+    modifier onlyAuthorizedContractsCanCall() {
+        if (!isAuthorized[msg.sender]) {
             revert VaultErrors.Vault__UnauthorizedAccess();
         }
         _;
+    }
+
+    function setAuthorizedContracts(
+        address[] calldata allowedContracts,
+        bool status
+    ) external onlyOwner {
+        for (uint256 i = 0; i < allowedContracts.length; i++) {
+            if (allowedContracts[i] == address(0)) {
+                revert Vault__InvalidAddress();
+            }
+
+            isAuthorized[allowedContracts[i]] = status;
+        }
     }
 
     function depositLiquidity(
         address user,
         address token,
         uint256 amount
-    ) external payable nonReentrant onlyLendingPool notPaused {
+    ) external payable nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(token).safeTransferFrom(user, address(this), amount);
     }
 
@@ -67,7 +86,7 @@ contract Vault is ReentrancyGuard, Ownable {
         address user,
         address token,
         uint256 amount
-    ) external payable nonReentrant onlyLendingPool notPaused {
+    ) external payable nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(token).safeTransferFrom(user, address(this), amount);
     }
 
@@ -75,21 +94,21 @@ contract Vault is ReentrancyGuard, Ownable {
         address user,
         address token,
         uint256 amount
-    ) external nonReentrant onlyLendingPool notPaused {
+    ) external nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(token).safeTransfer(user, amount);
     }
 
     function transferLoanAmount(
         address user,
         uint256 amount
-    ) external nonReentrant onlyLendingPool notPaused {
+    ) external nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(stableCoin).safeTransfer(user, amount);
     }
 
     function claimLoan(
         address user,
         uint256 amount
-    ) external nonReentrant onlyLendingPool notPaused {
+    ) external nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(stableCoin).transferFrom(user, address(this), amount);
     }
 
@@ -97,7 +116,7 @@ contract Vault is ReentrancyGuard, Ownable {
         address user,
         address token,
         uint256 amount
-    ) external nonReentrant onlyLendingPool notPaused {
+    ) external nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(token).safeTransfer(user, amount);
     }
 
@@ -105,7 +124,7 @@ contract Vault is ReentrancyGuard, Ownable {
         address token,
         address to,
         uint256 amount
-    ) external onlyLendingPool nonReentrant notPaused {
+    ) external onlyAuthorizedContractsCanCall nonReentrant notPaused {
         IERC20(token).safeTransfer(to, amount);
     }
 }

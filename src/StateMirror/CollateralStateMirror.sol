@@ -12,6 +12,7 @@ contract CollateralStateMirror is Ownable {
     /// @notice Stores collateral details for a user.
     /// @param amount The total amount of collateral.
     /// @param lastUpdatedTime The last timestamp when the collateral was updated.
+
     struct CollateralDetailsOfUser {
         uint256 amount;
         uint256 lastUpdatedTime;
@@ -19,6 +20,7 @@ contract CollateralStateMirror is Ownable {
 
     /// @notice Maps user collateral details per chain and token.
     /// @dev Nested mapping: chainId → user address → tokenId → CollateralDetailsOfUser.
+
     mapping(uint256 chainId => mapping(address user => mapping(uint64 tokenId => CollateralDetailsOfUser)))
         private s_userCollateralDetails;
 
@@ -28,6 +30,7 @@ contract CollateralStateMirror is Ownable {
     /// @param user The user whose collateral data is being updated.
     /// @param tokenId The token ID associated with the collateral.
     /// @param collateralDetailsOfUser_ The collateral details to update with.
+
     function updateCollateralDetaiilsOfUser(
         uint256 chainId,
         address user,
@@ -45,6 +48,7 @@ contract CollateralStateMirror is Ownable {
     /// @param user The user's address.
     /// @param tokenId The token ID for which to retrieve collateral data.
     /// @return The `CollateralDetailsOfUser` struct containing amount and last update time.
+
     function readCollateralDetailsOfUser(
         uint256 chainId,
         address user,

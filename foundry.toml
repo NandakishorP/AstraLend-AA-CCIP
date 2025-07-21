@@ -2,9 +2,9 @@
 src = "src"
 out = "out"
 libs = ["lib"]
-# rpc_endpoints = { eth = "https://eth-sepolia.g.alchemy.com/v2/tBB8RGqhj5jDY_HavrsouAD9KmayCNkd", arb = "https://arb-sepolia.g.alchemy.com/v2/tBB8RGqhj5jDY_HavrsouAD9KmayCNkd"}
+rpc_endpoints = { eth = "https://eth-sepolia.g.alchemy.com/v2/tBB8RGqhj5jDY_HavrsouAD9KmayCNkd", arb = "https://arb-sepolia.g.alchemy.com/v2/tBB8RGqhj5jDY_HavrsouAD9KmayCNkd"}
 
-rpc_endpoints = { chainA = "http://localhost:8545", chainB = "http://localhost:8546"}
+# rpc_endpoints = { chainA = "http://localhost:8545", chainB = "http://localhost:8546"}
 optimizer = true
 optimizer_runs = 200
 gas_limit = "10000000000"  
