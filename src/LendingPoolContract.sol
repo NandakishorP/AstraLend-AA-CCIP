@@ -431,6 +431,7 @@ contract LendingPoolContract is
         address collateralControllerAddress,
         address loanControllerAddress
     ) public initializer {
+        console.log("going to enter");
         require(!initialized, "Already initialized");
         initialized = true;
 
@@ -475,12 +476,9 @@ contract LendingPoolContract is
             collateralControllerAddress
         );
         loanController = ILoanController(loanControllerAddress);
-        console.log("reached here");
-        if (block.chainid == ethChainId) {
+        console.log(ethChainId);
+        if (block.chainid == 11155111) {
             GSM = IGlobalStateManager(gsm);
-        } else {
-            stateAggregator.setAuthorizedUpdators(address(ccipReceiver), true);
-            stateAggregator.setAuthorizedReadors(address(this), true);
         }
         registry = IRegistry(registry_);
     }

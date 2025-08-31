@@ -11,6 +11,14 @@ import {Registry} from "../src/AdminRegistry/Registry.sol";
 import {InterestRateModel} from "../../src/InterestRate/InterestRateModel.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
+import {Vault} from "../src/Vault.sol";
+import {CrossChainMessageSender} from "../src/ccip/CrossChainMessageSender.sol";
+import {CrossChainMessageReceiver} from "../src/ccip/CrossChainMessageReceiver.sol";
+import {CCIPReceiver} from "../src/ccip/CCIPReceiver.sol";
+import {CCIPRequestHandler} from "../src/ccip/CCIPRequestHandler.sol";
+import {LiquidityController} from "../src/service/LiquidityController.sol";
+import {CollateralController} from "../src/service/CollateralController.sol";
+import {LoanController} from "../src/service/LoanController.sol";
 
 contract DeployChainAScript is Script {
     address[] public tokenAddresses;
@@ -56,20 +64,77 @@ contract DeployChainAScript is Script {
         // unit testing its configured in the testing space itself
         LendingPoolContract lendingPoolContract = new LendingPoolContract();
         ProxyAdmin proxyAdmin = new ProxyAdmin(vm.addr(deployerKey));
+        Vault vault = new Vault(
+            address(lendingPoolContract),
+            address(stableCoin)
+        );
 
-        bytes memory data = abi.encodeWithSignature(
-            "initialize(address[],address[],uint64[],address,address,address,address,address,address)",
+        // we are supposed to pass the link token address and the router address but since this deployment is for testing and there is no real router or link address available its replaced with the lptoken address temperorarly
+        CrossChainMessageSender crossChainMessageSender = new CrossChainMessageSender(
+                address(lpToken),
+                address(lpToken)
+            );
+        CCIPRequestHandler ccipRequestHandler = new CCIPRequestHandler(
+            address(lendingPoolContract),
+            address(registry),
+            address(GSM),
+            address(crossChainMessageSender)
+        );
+        CCIPReceiver ccipReceiver = new CCIPReceiver(
+            address(lendingPoolContract),
+            address(registry),
+            address(ccipRequestHandler),
+            address(lpToken)
+        );
+
+        CrossChainMessageReceiver crossChainMessageReceiver = new CrossChainMessageReceiver(
+                address(lpToken),
+                address(ccipReceiver)
+            );
+        LoanController loanController = new LoanController(
+            address(GSM),
+            address(GSM),
+            address(lendingPoolContract),
+            address(registry),
+            address(vault)
+        );
+
+        CollateralController collateralController = new CollateralController(
+            address(registry),
+            address(vault),
+            address(GSM),
+            address(lendingPoolContract),
+            address(GSM)
+        );
+        LiquidityController liquidityController = new LiquidityController(
+            address(registry),
+            address(lendingPoolContract),
+            address(vault),
+            address(GSM),
+            address(GSM),
+            address(lpToken)
+        );
+        bytes memory data = abi.encodeWithSelector(
+            lendingPoolContract.initialize.selector,
             tokenAddresses,
             priceFeedAddresses,
             chainId,
             address(stableCoin),
             address(lpToken),
-            address(lpToken),
-            address(lpToken),
+            address(lpToken), // rewardDistributor
+            address(lpToken), // interestRateModel (check this!!)
             address(GSM),
-            address(registry)
+            address(registry),
+            address(vault),
+            address(crossChainMessageSender),
+            address(ccipReceiver),
+            address(ccipRequestHandler),
+            address(GSM), // incentivesController?
+            address(crossChainMessageReceiver),
+            address(liquidityController),
+            address(collateralController),
+            address(loanController)
         );
-
         TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(
             address(lendingPoolContract),
             address(proxyAdmin),
