@@ -420,6 +420,8 @@ contract CrossChainLending is Test {
             authorizedAddressesArbSepolia,
             true
         );
+
+        stateAggregator.setAuthorizedUpdators(address(ccipReceiverArbSepolia),true);
         stateAggregator.setAuthorizedReadors(
             address(collateralControllerArbSepolia),
             true
@@ -432,6 +434,8 @@ contract CrossChainLending is Test {
             address(loanControllerArbSepolia),
             true
         );
+
+        stateAggregator.setAuthorizedReadors(address(lendingPoolContractArbSepolia),true);
 
         stateAggregator.transferOwnership(
             address(lendingPoolContractArbSepolia)
