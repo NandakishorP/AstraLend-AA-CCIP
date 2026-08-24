@@ -1,0 +1,177 @@
+@import "tailwindcss";
+
+/*
+ * AstraLend design tokens.
+ *
+ * The product is dark-first: a deep space field with an aurora accent ramp
+ * (violet → indigo → cyan). Surfaces are translucent so the background gradient
+ * reads through them, which is what gives the app its depth.
+ */
+@theme {
+  --color-void: #05060c;
+  --color-abyss: #080a14;
+  --color-surface: #0d1020;
+  --color-surface-2: #12162a;
+  --color-hairline: #1d2338;
+
+  --color-ink: #eef1ff;
+  --color-ink-muted: #9aa3c7;
+  --color-ink-faint: #656d92;
+
+  --color-astra-50: #f2eeff;
+  --color-astra-200: #cdbcff;
+  --color-astra-400: #a78bfa;
+  --color-astra-500: #8b5cf6;
+  --color-astra-600: #7c3aed;
+
+  --color-glow: #22d3ee;
+  --color-mint: #34d399;
+  --color-amber: #fbbf24;
+  --color-rose: #fb7185;
+
+  --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: 1rem;
+
+  --animate-aurora: aurora 18s ease-in-out infinite;
+  --animate-rise: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-pulse-ring: pulse-ring 2.4s ease-out infinite;
+  --animate-marquee: marquee 40s linear infinite;
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes aurora {
+  0%,
+  100% {
+    transform: translate3d(-4%, -2%, 0) scale(1.05);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translate3d(4%, 3%, 0) scale(1.15);
+    opacity: 0.8;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(139 92 246 / 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgb(139 92 246 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(139 92 246 / 0);
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes shimmer {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-void);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numeric columns stay aligned when values change under polling. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+::selection {
+  background: var(--color-astra-600);
+  color: white;
+}
+
+/* Scrollbars, styled to disappear into the surface rather than interrupt it. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-hairline) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-hairline);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+@utility glass {
+  background: color-mix(in oklab, var(--color-surface) 82%, transparent);
+  border: 1px solid var(--color-hairline);
+  backdrop-filter: blur(18px);
+}
+
+@utility text-gradient {
+  background-image: linear-gradient(
+    100deg,
+    var(--color-astra-200),
+    var(--color-ink) 40%,
+    var(--color-glow)
+  );
+  background-clip: text;
+  color: transparent;
+}
+
+@utility grid-lines {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-hairline) 60%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--color-hairline) 60%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 56px 56px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
