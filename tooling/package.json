@@ -1,0 +1,15 @@
+{
+  "name": "astralend-tooling",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local two-chain demo environment: deploy, CCIP relayer, demo controls",
+  "scripts": {
+    "deploy": "node deploy-local.mjs",
+    "relayer": "node relayer.mjs",
+    "demo": "../tooling/start-demo.sh"
+  },
+  "dependencies": {
+    "ethers": "^6.13.4"
+  }
+}
