@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {console} from "forge-std/console.sol";
@@ -76,8 +75,19 @@ contract LPTokenStateMirror is Ownable {
         onlyOwner
         returns (uint256)
     {
+        // These are mapping *keys*, not comparisons: a wrong id silently reads a
+        // zeroed slot instead of reverting, so they must track the configured
+        // chain ids rather than being hardcoded.
         return
-            s_LPtokenInCirculationPerChain[11155111] +
-            s_LPtokenInCirculationPerChain[421614];
+            s_LPtokenInCirculationPerChain[ethChainId] +
+            s_LPtokenInCirculationPerChain[arbChainId];
+    }
+
+    uint256 public ethChainId = 11155111;
+    uint256 public arbChainId = 421614;
+
+    function setChainIds(uint256 ethChainId_, uint256 arbChainId_) external onlyOwner {
+        ethChainId = ethChainId_;
+        arbChainId = arbChainId_;
     }
 }

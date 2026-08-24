@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -9,35 +8,13 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {console} from "forge-std/console.sol";
 
-/**
- * @title Vault
- * @notice Manages the custody and movement of tokens for the lending protocol.
- * @dev Only callable by the LendingPool contract. Handles collateral, deposits, loan disbursals, and repayments.
- *
- * Functions:
- * - depositLiquidity: Accepts liquidity deposits from users into the protocol.
- * - depositCollateral: Accepts collateral tokens from users.
- * - withdrawDeposit: Allows users to withdraw their deposited liquidity.
- * - transferLoanAmount: Sends loan amounts (stablecoin) to users when loans are approved.
- * - claimLoan: Receives loan repayment amounts from users.
- * - transferCollateral: Returns collateral to users (e.g., after repayment or liquidation).
- * - transferToken: Generic token transfer function used internally.
- *
- * @custom:security Only callable by the LendingPool contract.
- * @custom:note Uses OpenZeppelin's SafeERC20 for secure token transfers.
- * @custom:error VaultErrors for paused state and unauthorized access.
- */
-
 contract Vault is ReentrancyGuard, Ownable {
     ILendingPoolContract private lendingPoolContract;
     using SafeERC20 for IERC20;
     address stableCoin;
     bool private paused;
-
     mapping(address => bool) isAuthorized;
-
     error Vault__InvalidAddress();
-
     constructor(
         address lendingPoolContract_,
         address stableCoinAddress_
@@ -46,21 +23,18 @@ contract Vault is ReentrancyGuard, Ownable {
         lendingPoolContract = ILendingPoolContract(lendingPoolContract_);
         stableCoin = stableCoinAddress_;
     }
-
     modifier notPaused() {
         if (paused == true) {
             revert VaultErrors.Vault__VaultPaused();
         }
         _;
     }
-
     modifier onlyAuthorizedContractsCanCall() {
         if (!isAuthorized[msg.sender]) {
             revert VaultErrors.Vault__UnauthorizedAccess();
         }
         _;
     }
-
     function setAuthorizedContracts(
         address[] calldata allowedContracts,
         bool status
@@ -69,11 +43,9 @@ contract Vault is ReentrancyGuard, Ownable {
             if (allowedContracts[i] == address(0)) {
                 revert Vault__InvalidAddress();
             }
-
             isAuthorized[allowedContracts[i]] = status;
         }
     }
-
     function depositLiquidity(
         address user,
         address token,
@@ -81,7 +53,6 @@ contract Vault is ReentrancyGuard, Ownable {
     ) external payable nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(token).safeTransferFrom(user, address(this), amount);
     }
-
     function depositCollateral(
         address user,
         address token,
@@ -89,7 +60,6 @@ contract Vault is ReentrancyGuard, Ownable {
     ) external payable nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(token).safeTransferFrom(user, address(this), amount);
     }
-
     function withdrawDeposit(
         address user,
         address token,
@@ -97,21 +67,18 @@ contract Vault is ReentrancyGuard, Ownable {
     ) external nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(token).safeTransfer(user, amount);
     }
-
     function transferLoanAmount(
         address user,
         uint256 amount
     ) external nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(stableCoin).safeTransfer(user, amount);
     }
-
     function claimLoan(
         address user,
         uint256 amount
     ) external nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(stableCoin).transferFrom(user, address(this), amount);
     }
-
     function transferCollateral(
         address user,
         address token,
@@ -119,7 +86,6 @@ contract Vault is ReentrancyGuard, Ownable {
     ) external nonReentrant onlyAuthorizedContractsCanCall notPaused {
         IERC20(token).safeTransfer(user, amount);
     }
-
     function transferToken(
         address token,
         address to,

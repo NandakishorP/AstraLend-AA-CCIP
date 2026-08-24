@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
 interface ILendingPoolContract {
@@ -56,4 +55,10 @@ interface ILendingPoolContract {
         uint64 tokenId,
         uint256 loanId
     ) external returns (uint256);
+
+    function getUserLoanCount(
+        uint256 chainId,
+        address user,
+        uint64 tokenId
+    ) external view returns (uint256);
 }

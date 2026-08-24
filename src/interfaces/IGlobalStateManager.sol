@@ -1,9 +1,7 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 import {LoanManager} from "../GSM/LoanManager.sol";
 
 interface IGlobalStateManager {
-    // COLLATERAL SECTION
 
     function updateDepositCollateralOfUser(
         uint256 chainId,
@@ -139,6 +137,10 @@ interface IGlobalStateManager {
     ) external view returns (uint256);
 
     function getTotalLiquidityPerToken(
+        uint64 tokenId
+    ) external view returns (uint256);
+
+    function getTotalBorrowedPerToken(
         uint64 tokenId
     ) external view returns (uint256);
 }

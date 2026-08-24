@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -26,8 +25,6 @@ contract LiquidityController is Ownable, ILiquidityContorller {
 
     uint256 arbChainId = 421614;
 
-    /// @dev this prevent the user from passing zero value to the contract
-    ///
 
     modifier isGreaterThanZero(uint256 amount) {
         if (amount == 0) {
@@ -59,7 +56,6 @@ contract LiquidityController is Ownable, ILiquidityContorller {
         address sender,
         uint256 amount
     ) external payable onlyOwner {
-        //safeTraansfer function is used instead of the normal transfer,it ensures that the user has approved necessery funds for the contract
         uint64 ethDestinationChainSelector = registry
             .getDestinationChainSelector(ethChainId);
         vault.depositLiquidity(sender, tokenAddress, amount);
@@ -196,23 +192,6 @@ contract LiquidityController is Ownable, ILiquidityContorller {
         );
     }
 
-    /**
-     * @notice Mints LP tokens to a specified address based on the provided amount.
-     * @dev This internal function ensures that the minting amount is greater than zero using the `isGreaterThanZero` modifier.
-     *      It attempts to mint LP tokens using the `ILpToken(lpToken).mint` function. If the minting fails, it reverts with
-     *      the `LendingPoolContract__LpTokenMintFailed` error.
-     *      Additionally, it updates the user's LP token balance in `tokenDetailsofUser`.
-     *
-     * @param to The address that will receive the minted LP tokens.
-     * @param amountToMint The amount of LP tokens to mint.
-     *
-     * @custom:requirements
-     * - `amountToMint` must be greater than zero.
-     * - The LP token minting function must succeed.
-     *
-     * @custom:reverts
-     * - `LendingPoolContract__LpTokenMintFailed` if the minting process fails.
-     */
     function _mintLpTokens(
         address to,
         uint256 amountToMint
@@ -222,7 +201,6 @@ contract LiquidityController is Ownable, ILiquidityContorller {
                 .LiquidityController__LpTokenMintFailed();
         }
     }
-
     function withDrawController(
         address tokenAddress,
         address user,
@@ -255,7 +233,6 @@ contract LiquidityController is Ownable, ILiquidityContorller {
                     arbDestinationChainSelector,
                     "crossChainMessageReceiverAddress"
                 );
-
             GSM.mirrorUpdateOfTheUserDeposit(
                 arbCrossChainReceiverAddress,
                 block.chainid,
@@ -301,16 +278,13 @@ contract LiquidityController is Ownable, ILiquidityContorller {
                 revert LiquidityControllerErrors
                     .LiquidityController__InsufficentFees();
             }
-
             (bool success, ) = payable(address(crossChainMessageSender)).call{
                 value: fees
             }("");
-
             if (!success) {
                 revert LiquidityControllerErrors
                     .LiquidityController__TransferFailed();
             }
-
             ICrossChainMessageSender(crossChainMessageSender)
                 .sendViaNativeToken(
                     receiver,
@@ -320,9 +294,21 @@ contract LiquidityController is Ownable, ILiquidityContorller {
                     amount
                 );
         }
-
         vault.withdrawDeposit(user, tokenAddress, amount);
-
         emit LendingPoolContract.DepositWithdrawn(user, tokenAddress, amount);
+    }
+
+    /**
+     * @notice Overrides the chain ids this contract treats as hub and satellite.
+     *
+     * The ids default to the live testnet values, so existing deployments and
+     * the integration tests are unaffected. A local deployment calls this to run
+     * the hub on an id that does not collide with a wallet's built-in networks —
+     * MetaMask reserves 11155111 for its own Sepolia and will not let a custom
+     * RPC own it, which makes gas estimation resolve against the wrong chain.
+     */
+    function setChainIds(uint256 ethChainId_, uint256 arbChainId_) external onlyOwner {
+        ethChainId = ethChainId_;
+        arbChainId = arbChainId_;
     }
 }

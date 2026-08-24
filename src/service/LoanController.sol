@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 import {LoanControllerErrors} from "../errors/Errors.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -39,8 +38,6 @@ contract LoanController is Ownable, ILoanController {
 
     uint256 arbChainId = 421614;
 
-    /// @dev this prevent the user from passing zero value to the contract
-    ///
 
     modifier isGreaterThanZero(uint256 amount) {
         if (amount == 0) {
@@ -67,7 +64,6 @@ contract LoanController is Ownable, ILoanController {
                 tokenId
             );
 
-        // Calculate the amount of collateral available for lending, considering the LTV ratio
         uint256 collateralAvailableForLending = (depositedCollateral * LTV) /
             PRECISION;
         uint256 collateralAvailableForLendingInUsd = lendingPoolContract
@@ -85,7 +81,6 @@ contract LoanController is Ownable, ILoanController {
             );
 
         LoanManager.LoanDetails memory loan;
-        // Update the loan details: amount borrowed, collateral used, last update, and due date
         loan.amountBorrowedInUSDT += amount;
         loan.principalAmount += amount;
         loan.asset = tokenAddress;
@@ -216,23 +211,18 @@ contract LoanController is Ownable, ILoanController {
 
         vault.claimLoan(user, amount);
         if (amount <= interestAccrued) {
-            // Entire repayment goes to pay interest only
             interestPaidNow = amount;
-            // Loan remains with the same principal but less interest
             scaledLoanAmount =
                 loan.amountBorrowedInUSDT +
                 (interestAccrued - interestPaidNow);
         } else {
-            // Repays full interest and some (or all) principal
             interestPaidNow = interestAccrued;
             principalRepaid = amount - interestPaidNow;
-            // Update the new loan amount after principal repayment
             scaledLoanAmount = loan.amountBorrowedInUSDT - principalRepaid;
         }
 
         loan.amountBorrowedInUSDT = scaledLoanAmount;
         loan.interestPaid += interestPaidNow;
-        // modify this part to update the collateral of the user in the gsm and arrange it to release the collateral from the chain
         if (loan.amountBorrowedInUSDT != 0) {
             loan.lastUpdate = block.timestamp;
             loan.userBorrowIndex = (
@@ -246,7 +236,7 @@ contract LoanController is Ownable, ILoanController {
         if (chainIdentififer) {
             GSM.repayLoanDetailsOfUser(loanChainId, user, tokenId, loan);
             uint64 destinationChainSelector = registry
-                .getDestinationChainSelector(421614);
+                .getDestinationChainSelector(arbChainId);
 
             address receiver = registry.getCrossChainAddress(
                 destinationChainSelector,
@@ -329,5 +319,19 @@ contract LoanController is Ownable, ILoanController {
             interestPaidNow,
             principalRepaid
         );
+    }
+
+    /**
+     * @notice Overrides the chain ids this contract treats as hub and satellite.
+     *
+     * The ids default to the live testnet values, so existing deployments and
+     * the integration tests are unaffected. A local deployment calls this to run
+     * the hub on an id that does not collide with a wallet's built-in networks —
+     * MetaMask reserves 11155111 for its own Sepolia and will not let a custom
+     * RPC own it, which makes gas estimation resolve against the wrong chain.
+     */
+    function setChainIds(uint256 ethChainId_, uint256 arbChainId_) external onlyOwner {
+        ethChainId = ethChainId_;
+        arbChainId = arbChainId_;
     }
 }

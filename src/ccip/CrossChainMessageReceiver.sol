@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 import {Client} from "@chainlink/contracts/src/v0.8/ccip/libraries/Client.sol";
 import {CCIPReceiver} from "@chainlink/contracts/src/v0.8/ccip/applications/CCIPReceiver.sol";
@@ -25,7 +24,6 @@ contract CrossChainMessageReceiver is CCIPReceiver, Ownable {
         _;
     }
 
-    // here we need to allow the ccip to be called and it need to be approved the ledningpool contract
     constructor(
         address router,
         address ccipReceiver_

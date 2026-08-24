@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IInterestRateModel} from "../interfaces/IInterestRateModel.sol";
@@ -6,19 +5,10 @@ import {IInterestRateModel} from "../interfaces/IInterestRateModel.sol";
 contract InterestRateManager is Ownable {
     IInterestRateModel interestRateModel;
 
-    /// @notice Tracks the index representing the total interest factor for each token across all borrowers.
-    /// @dev This index is used to calculate the compounded interest for each borrower of a specific token.
-    /// Each time interest is accrued, this index is updated to reflect the cumulative interest growth.
-    /// The individual borrower's interest can be calculated using the difference between the current index
-    /// and the index at the time of borrowing.
 
     mapping(uint64 tokenId => uint256 borrowerIndexOfToken)
         public s_borrowerIndex;
 
-    /// @notice Records the last timestamp when interest was accrued for each token.
-    /// @dev This is used to determine how much time has passed since the last interest update for a specific token,
-    /// which is essential for calculating how much new interest should be added to the borrower's debt.
-    /// Interest accrual operations refer to this timestamp to keep interest calculations accurate and consistent.
 
     mapping(uint64 tokenId => uint256) public s_lastAccuralTime;
 

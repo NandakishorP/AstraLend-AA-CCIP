@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import {GlobalStateManagerErrors} from "../errors/Errors.sol";
@@ -18,19 +17,14 @@ import {GlobalStateManagerErrors} from "../errors/Errors.sol";
 import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 
 contract GlobalStateManager is IGlobalStateManager, Ownable {
-    /// @dev Tracks whether a specific address is allowed to call restricted functions.
     mapping(address caller => bool) private s_isAllowedToCall;
 
-    /// @notice Contract responsible for managing user collateral across chains.
     CollateralManager collateralManager;
 
-    /// @notice Contract responsible for managing loan creation, repayment, and state.
     LoanManager loanManager;
 
-    /// @notice Registry contract used for fetching global system configuration and references.
     IRegistry registry;
 
-    /// @notice Interface for sending cross-chain messages to other blockchain networks.
     ICrossChainMessageSender crossChainMessageSender;
 
     LiquidityManager liquidityManager;
@@ -41,19 +35,21 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
 
     ILendingPoolContract lendingPoolContract;
 
-    uint256 private constant LIQUIDATION_PENALTY = 5e16; // 5% penalty on LIQUIDATION_PENALTY
+    uint256 private constant LIQUIDATION_PENALTY = 5e16;
 
-    /// @dev The precision factor used for calculations involving token amounts or decimals
-    /// @notice This constant defines the precision (1e18) for scaling values to match token precision or to avoid precision loss
 
     uint256 private constant PRECISION = 1e18;
 
-    /// @notice Emitted when a user's loan is liquidated due to insufficient collateral.
-    /// @param user The address of the user whose loan was liquidated.
-    /// @param token The address of the token associated with the loan.
-    /// @param loanAmount The total outstanding loan amount at the time of liquidation.
-    /// @param collateralValue The USD value of the user's collateral.
-    /// @param liquidationPenalty The penalty amount applied during liquidation.
+    // Mirrored to the satellite on liquidation. Settable so a local deployment
+    // can run on non-colliding chain ids; defaults match the live testnets.
+    uint256 public ethChainId = 11155111;
+    uint256 public arbChainId = 421614;
+
+    function setChainIds(uint256 ethChainId_, uint256 arbChainId_) external onlyOwner {
+        ethChainId = ethChainId_;
+        arbChainId = arbChainId_;
+    }
+
 
     event LoanLiquidated(
         address indexed user,
@@ -96,7 +92,7 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         uint64 destinationChainSelector
     ) external {
         bytes memory data = abi.encode(
-            uint64(1), // Identifier for response payload
+            uint64(1),
             LendingPoolContract.CrossChainResponsePayLoad({
                 response: LendingPoolContract
                     .Response
@@ -114,20 +110,15 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
             })
         );
 
-        // Send the payload to the receiver contract on the destination chain using native token mode.
-        // @test: first test resposen to the send message(1)
         crossChainMessageSender.sendViaNativeToken(
             receiver,
             data,
             destinationChainSelector,
-            address(0), // No token attached in this message
+            address(0),
             0
         );
     }
 
-    // only the lending pool contract of the main chain and the cross chain senders
-    // of the other chains can call this state manager contract
-    // this need to be implemented
 
     modifier isChainRegesitedToCall() {
         if (!s_isAllowedToCall[msg.sender]) {
@@ -156,7 +147,12 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         return liquidityManager.getTotalLiquidityPerToken(tokenId);
     }
 
-    // COLLATERAL SECTION
+    function getTotalBorrowedPerToken(
+        uint64 tokenId
+    ) external view returns (uint256) {
+        return loanManager.readTotalBorrwedPerToken(tokenId);
+    }
+
 
     function updateDepositCollateralOfUser(
         uint256 chainId,
@@ -206,13 +202,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
             );
     }
 
-    /// @notice Sends a mirrored update of a user’s collateral information to a contract on another chain.
-    /// @dev This function is used to synchronize collateral data across chains via a cross-chain message using native tokens.
-    /// @param receiver The address on the destination chain that will receive and process the collateral update.
-    /// @param chainId_ The ID of the chain where the original collateral data is stored.
-    /// @param user_ The address of the user whose collateral data is being mirrored.
-    /// @param tokenId The ID of the collateral token whose data is being transferred.
-    /// @param destinationChainSelector The selector (Chainlink CCIP identifier) for the destination chain.
 
     function mirrorUpdateOfTheUserCollateral(
         address receiver,
@@ -221,15 +210,13 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         uint64 tokenId,
         uint64 destinationChainSelector
     ) public isChainRegesitedToCall {
-        // Fetch the user's collateral amount for the given chain and token.
         uint256 userCollateralDetails = getUserCollateralDetails(
             chainId_,
             user_,
             tokenId
         );
-        // Prepare the encoded message payload for cross-chain delivery.
         bytes memory data = abi.encode(
-            uint64(1), // Identifier for response payload
+            uint64(1),
             LendingPoolContract.CrossChainResponsePayLoad({
                 response: LendingPoolContract
                     .Response
@@ -244,17 +231,15 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
             })
         );
 
-        // Send the payload to the receiver contract on the destination chain using native token mode.
         crossChainMessageSender.sendViaNativeToken(
             receiver,
             data,
             destinationChainSelector,
-            address(0), // No token attached in this message
+            address(0),
             0
         );
     }
 
-    // LOAN DETAILS
 
     function updateBorrowLoanDetailsOfUser(
         uint256 chainId,
@@ -373,7 +358,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         );
     }
 
-    // DEPOSIT DETAILS
 
     function updateDepositDetailsOfUser(
         uint256 chainId,
@@ -468,7 +452,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         );
     }
 
-    // LP TOKEN MANAGER
 
     function updateLPTokenInCirculation(
         uint256 chainId,
@@ -518,50 +501,10 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
             );
     }
 
-    // BORROWER INDEX
 
     function getBorrowerIndex(uint64 tokenId) external view returns (uint256) {
         return interestRateManager.getBorrowerIndex(tokenId);
     }
-
-    // liquidate function
-    /**
-     * @notice This function allows the liquidation of a borrower's loan if the value of their collateral falls below the required threshold.
-     *
-     * @dev
-     * - A loan is considered liquidatable if the value of the collateral is lower than the required liquidation value.
-     * - In such cases, the collateral is transferred from the borrower’s account to the liquidity pool, and the loan is removed from the system.
-     * - This function also ensures that only approved tokens can be used for liquidation and that it cannot be re-entered during execution (non-reentrancy check).
-     *
-     * The liquidation process involves:
-     * 1. Verifying that the loan is still active by checking if the borrower owes an outstanding amount.
-     * 2. Determining the current value of the collateral in USD using the token’s price feed.
-     * 3. Comparing the value of the collateral against the liquidation threshold, which is calculated as the loan amount plus a liquidation penalty.
-     * 4. If the collateral value is below the liquidation threshold, the collateral is moved back to the liquidity pool and the loan is cleared from the system.
-     * 5. If the collateral is above the liquidation threshold, the liquidation is rejected, and the loan remains active.
-     *
-     * @param user The address of the borrower whose loan is being liquidated.
-     * @param tokenId The address of the token used for the loan (the token collateralized by the borrower).
-     *
-     *
-     *
-     * @dev
-     * This function will emit the `LoanLiquidated` event when the liquidation is successful.
-     * The event contains details about the loan that was liquidated, including the amount borrowed, the value of collateral, and the liquidation threshold.
-     *
-     * @dev
-     * Requirements:
-     * - The `token` must be approved by the contract for liquidation.
-     * - The loan must exist and be active.
-     * - The collateral value must fall below the required liquidation value for the liquidation to proceed.
-     *
-     * @custom:revert LendingPoolContract__LoanIsNotActive The loan does not exist or has been fully repaid, so it cannot be liquidated.
-     * @custom:revert LendingPoolContract__NotLiquidatable The collateral value is greater than the liquidation threshold, so liquidation is not possible.
-     *
-     * event LoanLiquidated
-     * - Emitted when a loan is successfully liquidated.
-     * - Contains details of the loan amount, collateral value, and liquidation value.
-     */
 
     function liquidate(
         uint256 chainId,
@@ -613,14 +556,12 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         }
         loanManager.deleteLoanDetails(chainId, user, tokenId, loan.loanId);
         uint64 destinationChainSelector = registry.getDestinationChainSelector(
-            421614
+            arbChainId
         );
-
         address receiver = registry.getCrossChainAddress(
             destinationChainSelector,
             "crossChainMessageReceiverAddress"
         );
-
         mirrorUpdateOfTheUserLoan(
             receiver,
             chainId,
@@ -637,21 +578,8 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
             liquidationValue
         );
     }
-
-    /**
-     * @notice Checks if any borrower's loan has passed its due date and requires liquidation.
-     * @dev This function is used by Chainlink Keepers (or any automated service) to determine if maintenance work is needed.
-     * It loops through all borrowers and their loan tokens to find any overdue loans.
-     * If an overdue loan is found, it returns `true` with encoded borrower and token information.
-     * If no overdue loans are found, it returns `false` and empty performData.
-     *
-     * checkData Not used in this function. Included to match the KeeperCompatibleInterface.
-     * @return upkeepNeeded A boolean value indicating whether upkeep (liquidation) is needed.
-     * @return performData Encoded data containing the borrower address and token address to be used in performUpkeep.
-     */
-
     function checkUpkeep(
-        bytes calldata /* checkData */
+        bytes calldata
     ) external view returns (bool upkeepNeeded, bytes memory performData) {
         for (uint256 i = 0; i < loanManager.getLengthOfBorrowerArray(); i++) {
             address borrower = loanManager.getBorrower(i);
@@ -670,8 +598,10 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
                             borrower,
                             tokens[t]
                         );
-
-                    for (uint256 l = 0; l < loanCount; l++) {
+                    // Loan ids are 1-based (LoanController assigns
+                    // `loan.loanId = ++loanId`), so scanning from 0 read an
+                    // empty slot for every borrower and missed the real loans.
+                    for (uint256 l = 1; l <= loanCount; l++) {
                         LoanManager.LoanDetails memory loan = loanManager
                             .getLoanDetailsOfUser(
                                 chains[c],
@@ -679,20 +609,21 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
                                 tokens[t],
                                 l
                             );
-
                         uint256 collateralValueInUSD = lendingPoolContract
                             .getUsdValue(tokens[t], loan.collateralUsed);
-
                         uint256 liquidationValue = (loan.amountBorrowedInUSDT *
                             LIQUIDATION_PENALTY) / PRECISION;
-
                         if (
                             block.timestamp > loan.dueDate ||
                             collateralValueInUSD < liquidationValue
                         ) {
+                            // Field order must match performUpkeep's decode —
+                            // (chainId, borrower, tokenId, loanId). Emitting
+                            // borrower first made every keeper run decode the
+                            // address as a chain id and act on nothing.
                             return (
                                 true,
-                                abi.encode(borrower, chains[c], tokens[t], l)
+                                abi.encode(chains[c], borrower, tokens[t], l)
                             );
                         }
                     }
@@ -701,16 +632,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         }
         return (false, "");
     }
-
-    /**
-     * @notice Performs the upkeep by liquidating overdue loans.
-     * @dev This function is triggered by Chainlink Keepers (or other automated services)
-     * when `checkUpkeep` signals that upkeep is needed. It decodes the borrower and token from
-     * the `performData`, checks if the loan is overdue, and if so, calls the `liquidate` function.
-     *
-     * @param performData Encoded data containing the borrower's address and the token address,
-     * produced by `checkUpkeep`.
-     */
     function performUpkeep(bytes calldata performData) external {
         (
             uint256 chainId,
@@ -733,6 +654,16 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
             loan.amountBorrowedInUSDT +=
                 (loan.amountBorrowedInUSDT * LIQUIDATION_PENALTY) /
                 PRECISION;
+            // `loan` is a memory copy, so the escalation above is discarded
+            // unless it is written back. Without this the penalty count never
+            // advances, never reaches 2, and `liquidate` below is unreachable.
+            loanManager.updateLoanDetailsOfUser(
+                chainId,
+                borrower,
+                tokenId,
+                loanId,
+                loan
+            );
         } else {
             liquidate(chainId, borrower, tokenId, loanId);
         }

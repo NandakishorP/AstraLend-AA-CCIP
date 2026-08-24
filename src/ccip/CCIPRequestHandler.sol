@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 import {Client} from "@chainlink/contracts/src/v0.8/ccip/libraries/Client.sol";
 import {LendingPoolContract} from "../LendingPoolContract.sol";
@@ -15,19 +14,14 @@ import {console} from "forge-std/console.sol";
 import {LoanManager} from "../GSM/LoanManager.sol";
 
 contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
-    /// @notice Interface to manage and update global state (like loan or collateral states) across chains.
     IGlobalStateManager GSM;
 
-    /// @notice Interface to access the registry for retrieving cross-chain contract addresses by name and chain ID.
     IRegistry registry;
 
-    /// @notice Chain ID representing Ethereum Sepolia testnet. Used to determine if execution context is on Sepolia.
-    uint256 ethChainId = 11155111; // for sepolia now
+    uint256 ethChainId = 11155111;
 
-    /// @notice Interface to send messages to other chains via a cross-chain messaging protocol (e.g., CCIP).
     ICrossChainMessageSender crossChainMessageSender;
 
-    /// @notice Interface to the LendingPoolContract for interacting with lending and borrowing functionalities.
     ILendingPoolContract lendingPoolContract;
 
     error OnlyOwnerCanCall();
@@ -178,7 +172,6 @@ contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
         GSM.updateLPTokenInCirculation(chainId, user, amount);
     }
 
-    // WITHDRAW DEPOSITS
 
     function updateWithdrawDepositDetailsOfUser(
         uint256 chainId,
@@ -187,5 +180,18 @@ contract CCIPRequestHandler is ICCIPRequestHandler, Ownable {
         uint256 amount
     ) external {
         GSM.updateWithDrawDetailsOfUser(chainId, user, tokenId, amount);
+    }
+
+    /**
+     * @notice Overrides the chain ids this contract treats as the hub.
+     *
+     * The ids default to the live testnet values, so existing deployments and
+     * the integration tests are unaffected. A local deployment calls this to run
+     * the hub on an id that does not collide with a wallet's built-in networks —
+     * MetaMask reserves 11155111 for its own Sepolia and will not let a custom
+     * RPC own it, which makes gas estimation resolve against the wrong chain.
+     */
+    function setChainIds(uint256 ethChainId_) external onlyOwner {
+        ethChainId = ethChainId_;
     }
 }

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -252,5 +251,19 @@ contract CollateralController is Ownable, ICollateralController {
             tokenAddress,
             amount
         );
+    }
+
+    /**
+     * @notice Overrides the chain ids this contract treats as hub and satellite.
+     *
+     * The ids default to the live testnet values, so existing deployments and
+     * the integration tests are unaffected. A local deployment calls this to run
+     * the hub on an id that does not collide with a wallet's built-in networks —
+     * MetaMask reserves 11155111 for its own Sepolia and will not let a custom
+     * RPC own it, which makes gas estimation resolve against the wrong chain.
+     */
+    function setChainIds(uint256 ethChainId_, uint256 arbChainId_) external onlyOwner {
+        ethChainId = ethChainId_;
+        arbChainId = arbChainId_;
     }
 }
