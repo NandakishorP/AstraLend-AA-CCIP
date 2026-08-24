@@ -31,6 +31,13 @@ const KIND_STYLE: Record<ActivityKind, { tone: string; symbol: string }> = {
   "ccip-out": { tone: "text-glow border-glow/30 bg-glow/10", symbol: "⇥" },
   "ccip-in": { tone: "text-glow border-glow/30 bg-glow/10", symbol: "⇤" },
   liquidation: { tone: "text-rose border-rose/30 bg-rose/10", symbol: "!" },
+  // Real-world collateral. Added in the same change as the indexer's new event
+  // kinds — the two vocabularies drifting apart is exactly what took this route
+  // down last time.
+  "lien-created": { tone: "text-astra-200 border-astra-400/30 bg-astra-500/10", symbol: "⛓" },
+  "lien-released": { tone: "text-mint border-mint/30 bg-mint/10", symbol: "⛓" },
+  "lien-foreclosed": { tone: "text-rose border-rose/30 bg-rose/10", symbol: "⚖" },
+  eligibility: { tone: "text-glow border-glow/30 bg-glow/10", symbol: "✓" },
 };
 
 /**

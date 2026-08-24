@@ -143,3 +143,58 @@ export function useIndexerStatus() {
     retry: false,
   });
 }
+
+// ─── Real-world asset collateral ──────────────────────────────────────────────
+
+/**
+ * Whether this deployment has the RWA module wired.
+ *
+ * Retries are off and failure is not an error state the UI shows — a deployment
+ * without the module is a normal configuration, not a fault.
+ */
+export function useRwaStatus() {
+  return useQuery({
+    queryKey: ["rwa-status"],
+    queryFn: () => api.rwaStatus(),
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * NAV and accretion progress.
+ *
+ * Polled slowly on purpose. A bill's value moves by arithmetic over 91 days,
+ * so there is nothing to catch by asking often.
+ */
+export function useRwaNav(enabled = true) {
+  return useQuery({
+    queryKey: ["rwa-nav"],
+    queryFn: () => api.rwaNav(),
+    enabled,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+}
+
+export function useRwaHolding(enabled = true) {
+  const { address } = useAccount();
+  return useQuery({
+    queryKey: ["rwa-holding", address],
+    queryFn: () => api.rwaHolding(address as string),
+    enabled: enabled && Boolean(address),
+    refetchInterval: 12_000,
+    retry: false,
+  });
+}
+
+export function useRwaLien(enabled = true) {
+  const { address } = useAccount();
+  return useQuery({
+    queryKey: ["rwa-lien", address],
+    queryFn: () => api.rwaLien(address as string),
+    enabled: enabled && Boolean(address),
+    refetchInterval: 12_000,
+    retry: false,
+  });
+}

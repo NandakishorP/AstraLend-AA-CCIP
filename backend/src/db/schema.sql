@@ -145,3 +145,57 @@ CREATE TABLE IF NOT EXISTS participants (
   event_count  INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (chain, address)
 );
+
+-- ─── Real-world asset collateral ─────────────────────────────────────────────
+-- A lien is the on-chain half of a recorded pledge. Unlike crypto collateral,
+-- which is evidenced by a vault balance, an encumbrance leaves no balance to
+-- read — the borrower still holds the tokens. The register is the only record,
+-- so it has to be indexed to be queryable.
+
+CREATE TABLE IF NOT EXISTS liens (
+  lien_id       TEXT    NOT NULL,
+  chain         TEXT    NOT NULL,
+  borrower      TEXT    NOT NULL,
+  token_address TEXT    NOT NULL,
+  amount        TEXT    NOT NULL,
+  loan_ref      TEXT,
+  perfected_at  INTEGER NOT NULL,
+  released_at   INTEGER,
+  foreclosed    INTEGER NOT NULL DEFAULT 0,
+  tx_hash       TEXT    NOT NULL,
+  block_number  INTEGER NOT NULL,
+  PRIMARY KEY (chain, lien_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_liens_borrower
+  ON liens (chain, borrower, perfected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_liens_active
+  ON liens (chain, released_at, foreclosed);
+
+-- Eligibility decays: an attestation carries an expiry, and a row that has not
+-- been revoked can still be stale. Queries must compare against expiry rather
+-- than trusting the flag.
+CREATE TABLE IF NOT EXISTS eligibility (
+  subject       TEXT    NOT NULL,
+  chain         TEXT    NOT NULL,
+  jurisdiction  TEXT,
+  expiry        INTEGER NOT NULL,
+  registered_at INTEGER NOT NULL,
+  revoked_at    INTEGER,
+  tx_hash       TEXT    NOT NULL,
+  PRIMARY KEY (chain, subject)
+);
+
+-- A bill's NAV is computed rather than reported, so this is not a feed archive.
+-- It exists so the UI can plot accretion toward par without recomputing the
+-- curve client-side.
+CREATE TABLE IF NOT EXISTS nav_history (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  chain         TEXT    NOT NULL,
+  token_address TEXT    NOT NULL,
+  nav           TEXT    NOT NULL,
+  timestamp     INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_nav_token
+  ON nav_history (chain, token_address, timestamp DESC);

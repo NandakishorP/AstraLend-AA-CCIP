@@ -23,6 +23,15 @@ const envSchema = z.object({
   ARB_VAULT_ADDRESS: z.string().optional(),
   ARB_STABLE_COIN_ADDRESS: z.string().optional(),
 
+  // Real-world asset collateral. Hub-only by design: the instrument exists on
+  // one chain and only messages about its encumbrance ever cross, so there are
+  // no satellite equivalents of these.
+  RWA_TOKEN_ADDRESS: z.string().optional(),
+  RWA_ISSUER_ADDRESS: z.string().optional(),
+  RWA_LIEN_REGISTRY_ADDRESS: z.string().optional(),
+  RWA_ELIGIBILITY_ADDRESS: z.string().optional(),
+  RWA_NAV_ORACLE_ADDRESS: z.string().optional(),
+
   // CCIP router per chain. Indexing these lets the API track cross-chain
   // messages in flight; without them everything else still works.
   ETH_CCIP_ROUTER_ADDRESS: z.string().optional(),

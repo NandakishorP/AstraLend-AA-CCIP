@@ -36,7 +36,11 @@ export type ActivityKind =
   | "lp-burn"
   | "ccip-out"
   | "ccip-in"
-  | "liquidation";
+  | "liquidation"
+  | "lien-created"
+  | "lien-released"
+  | "lien-foreclosed"
+  | "eligibility";
 
 /**
  * Every protocol event the UI renders, mapped to a stable, human-facing kind.
@@ -55,6 +59,16 @@ export const EVENT_KINDS: Record<string, { kind: ActivityKind; label: string }> 
   TokenTransferInitiated: { kind: "ccip-out", label: "Cross-chain transfer sent" },
   TokensReceivedFromCrossChain: { kind: "ccip-in", label: "Cross-chain transfer received" },
   LoanLiquidated: { kind: "liquidation", label: "Loan liquidated" },
+  // Real-world asset collateral. LienCreated is not a log about a pledge
+  // recorded elsewhere — it is the register entry itself, which is what makes
+  // the charge good against third parties.
+  LienCreated: { kind: "lien-created", label: "Collateral encumbered" },
+  LienIncreased: { kind: "lien-created", label: "Encumbrance increased" },
+  LienDecreased: { kind: "lien-released", label: "Encumbrance reduced" },
+  LienReleased: { kind: "lien-released", label: "Collateral released" },
+  LienForeclosed: { kind: "lien-foreclosed", label: "Collateral foreclosed" },
+  EligibilityGranted: { kind: "eligibility", label: "Eligibility attested" },
+  EligibilityRevoked: { kind: "eligibility", label: "Eligibility revoked" },
 };
 
 export interface DecodedEvent {

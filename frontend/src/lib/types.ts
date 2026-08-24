@@ -172,7 +172,11 @@ export type ActivityKind =
   | "lp-burn"
   | "ccip-out"
   | "ccip-in"
-  | "liquidation";
+  | "liquidation"
+  | "lien-created"
+  | "lien-released"
+  | "lien-foreclosed"
+  | "eligibility";
 
 export interface ActivityEvent {
   kind: ActivityKind;
@@ -403,4 +407,62 @@ export interface IndexerChainStatus {
   reorgsHandled: number;
   lastRunAt: number | null;
   lastError: string | null;
+}
+
+// ─── Real-world asset collateral ──────────────────────────────────────────────
+
+/**
+ * A holder's position in an encumbered instrument.
+ *
+ * `balance` and `encumbered` are reported together on purpose. Pledging does not
+ * move the tokens, so the balance alone says nothing about what is committed —
+ * only the gap between balance and free does.
+ */
+export interface RwaHolding {
+  userAddress: string;
+  tokenAddress: string;
+  symbol: string;
+  decimals: number;
+  balance: string;
+  encumbered: string;
+  free: string;
+  balanceUsd: string;
+  encumberedUsd: string;
+  freeUsd: string;
+  navPerToken: string;
+  eligible: boolean;
+  eligibilityExpiry: number | null;
+}
+
+export interface NavSnapshot {
+  tokenAddress: string;
+  description: string;
+  navPerToken: string;
+  navDecimals: number;
+  issuePrice: string;
+  faceValue: string;
+  issueDate: number;
+  maturityDate: number;
+  isMatured: boolean;
+  /** How much of the discount has been earned, 0 to 1. */
+  accretionProgress: number;
+  daysToMaturity: number;
+  /** Always false — the value is computed on read, never reported. */
+  isStale: false;
+}
+
+export interface LienView {
+  lienId: string;
+  borrower: string;
+  tokenAddress: string;
+  amount: string;
+  loanRef: string;
+  perfectedAt: number;
+  releasedAt: number | null;
+  foreclosed: boolean;
+  active: boolean;
+}
+
+export interface RwaStatus {
+  available: boolean;
 }

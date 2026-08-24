@@ -22,6 +22,7 @@ import activityRoutes from "./routes/activity.route.js";
 import faucetRoutes from "./routes/faucet.route.js";
 import demoRoutes from "./routes/demo.route.js";
 import analyticsRoutes from "./routes/analytics.route.js";
+import rwaRoutes from "./routes/rwa.route.js";
 import { startIndexer, stopIndexer } from "./indexer/indexer.js";
 import { startSnapshotter, stopSnapshotter } from "./indexer/snapshotter.js";
 import { getDb, closeDb } from "./db/index.js";
@@ -249,6 +250,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await fastify.register(faucetRoutes,     { prefix: "/faucet" });
   await fastify.register(demoRoutes,       { prefix: "/demo" });
   await fastify.register(analyticsRoutes,  { prefix: "/analytics" });
+  await fastify.register(rwaRoutes,       { prefix: "/rwa" });
 
   return fastify;
 }

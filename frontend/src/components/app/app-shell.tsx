@@ -14,6 +14,7 @@ const NAV = [
   { href: "/app", label: "Dashboard", icon: IconGrid, exact: true },
   { href: "/app/markets", label: "Markets", icon: IconLayers },
   { href: "/app/borrow", label: "Borrow", icon: IconArrowDown },
+  { href: "/app/collateral", label: "RWA", icon: IconWallet },
   { href: "/app/portfolio", label: "Portfolio", icon: IconWallet },
   { href: "/app/activity", label: "Activity", icon: IconPulse },
 ];

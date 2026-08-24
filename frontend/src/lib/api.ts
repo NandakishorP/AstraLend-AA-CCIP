@@ -19,6 +19,10 @@ import type {
   MarketOverview,
   ReadinessReport,
   UserPortfolio,
+  RwaHolding,
+  NavSnapshot,
+  LienView,
+  RwaStatus,
 } from "./types";
 
 export const API_BASE =
@@ -123,6 +127,17 @@ export const api = {
 
   activity: (address: string, chain: ChainKey, limit = 40) =>
     request<ActivityFeed>(`/activity/${address}${query({ chain, limit })}`),
+
+  // Real-world collateral. No chain parameter anywhere here: the instrument
+  // exists on the hub and nowhere else, which is the reason only messages about
+  // its encumbrance ever cross to the satellite.
+  rwaStatus: () => request<RwaStatus>("/rwa/status"),
+
+  rwaNav: () => request<NavSnapshot>("/rwa/nav"),
+
+  rwaHolding: (address: string) => request<RwaHolding>(`/rwa/holding/${address}`),
+
+  rwaLien: (address: string) => request<LienView | null>(`/rwa/lien/${address}`),
 
   repayAmount: (args: {
     loanChainId: string;
