@@ -199,16 +199,6 @@ contract CollateralController is Ownable, ICollateralController {
         emit LendingPoolContract.CollateralDeposited(sender, tokenAddress, amount);
     }
 
-    /// @notice Partially discharges a charge when RWA collateral is withdrawn.
-    function releaseRwaCollateral(
-        address tokenAddress,
-        address user,
-        uint256 amount
-    ) external onlyOwner {
-        bytes32 lienId = lienRegistry.computeLienId(user, tokenAddress, COLLATERAL_PLEDGE_REF);
-        lienRegistry.decreaseLien(lienId, amount);
-    }
-
     function setLienRegistry(address lienRegistry_) external onlyOwner {
         lienRegistry = ILienRegistry(lienRegistry_);
     }
@@ -325,7 +315,16 @@ contract CollateralController is Ownable, ICollateralController {
                 );
         }
 
-        vault.transferCollateral(user, tokenAddress, amount);
+        // Crypto collateral leaves the vault; an encumbered instrument was never
+        // in it. For RWA the withdrawal is a partial discharge of the charge —
+        // the tokens have been in the borrower's wallet the whole time, so
+        // there is nothing to send back, only a lien to reduce.
+        if (lendingPoolContract.isRwaAsset(tokenId)) {
+            bytes32 lienId = lienRegistry.computeLienId(user, tokenAddress, COLLATERAL_PLEDGE_REF);
+            lienRegistry.decreaseLien(lienId, amount);
+        } else {
+            vault.transferCollateral(user, tokenAddress, amount);
+        }
 
         emit LendingPoolContract.CollateralWithdrawed(
             user,

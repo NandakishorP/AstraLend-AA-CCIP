@@ -65,4 +65,8 @@ interface ILendingPoolContract {
     function getLtv(uint64 tokenId) external view returns (uint256);
 
     function getLiquidationThreshold(uint64 tokenId) external view returns (uint256);
+
+    function isRwaAsset(uint64 tokenId) external view returns (bool);
+
+    function getAssetMaturity(uint64 tokenId) external view returns (uint64);
 }

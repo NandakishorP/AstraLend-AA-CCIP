@@ -6,6 +6,7 @@ import {StableCoin} from "../src/tokens/StableCoin.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ILpToken} from "./interfaces/ILpToken.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IRWAValuation} from "./rwa/interfaces/IRWAValuation.sol";
 import {AggregatorV3Interface} from "../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {ILendingPoolContract} from "../src/interfaces/ILendingPoolContract.sol";
 import {LendingPoolContractErrors} from "./errors/Errors.sol";
@@ -438,6 +439,20 @@ contract LendingPoolContract is
     function getLiquidationThreshold(uint64 tokenId) public view returns (uint256) {
         RiskParams memory params = s_riskParams[tokenId];
         return params.configured ? params.liquidationThreshold : LIQUIDATION_THRESHOLD;
+    }
+
+    /**
+     * @notice When the collateral instrument redeems itself, or 0 if it never does.
+     * @dev A bill reaches maturity on a fixed date and converts to cash. If that
+     *      happens while it is still pledged, the lender's security evaporates —
+     *      so the borrow path refuses a loan that would outlive its collateral.
+     *      Tri-party repo has always worked this way; the constraint is real
+     *      practice rather than a workaround.
+     */
+    function getAssetMaturity(uint64 tokenId) public view returns (uint64) {
+        RiskParams memory params = s_riskParams[tokenId];
+        if (!params.configured || params.assetType != AssetType.RWA) return 0;
+        return IRWAValuation(s_priceFeed[tokenId]).maturityDate();
     }
 
     function getRiskParams(uint64 tokenId) external view returns (RiskParams memory) {

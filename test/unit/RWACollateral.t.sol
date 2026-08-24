@@ -267,6 +267,56 @@ contract RWACollateralTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * Foreclosure must not bar the borrower from ever pledging again.
+     *
+     * The lien id was originally a pure function of borrower and asset, so the
+     * slot stayed occupied after a charge closed and every later pledge died on
+     * Lien__DuplicateLien. Anyone foreclosed once was locked out permanently,
+     * which is not how credit works anywhere.
+     */
+    function test_canPledgeAgainAfterForeclosure() public {
+        bytes32 first = _pledge(500e18);
+
+        vm.prank(trustee);
+        liens.foreclose(first);
+
+        // The trustee took 500; 500 remain with Alice, free.
+        assertEq(token.balanceOf(alice), 500e18);
+        assertEq(token.encumberedOf(alice), 0);
+
+        bytes32 second = _pledge(400e18);
+        assertTrue(second != first, "a fresh charge must get a fresh id");
+        assertTrue(liens.isActive(second));
+        assertEq(token.encumberedOf(alice), 400e18);
+    }
+
+    function test_canPledgeAgainAfterRelease() public {
+        bytes32 first = _pledge(800e18);
+
+        vm.prank(pool);
+        liens.releaseLien(first);
+
+        bytes32 second = _pledge(800e18);
+        assertTrue(second != first);
+        assertTrue(liens.isActive(second));
+        assertEq(liens.pledgeSequence(alice, address(token)), 1);
+    }
+
+    /// The closed charge stays readable — the register is append-only.
+    function test_closedLienRemainsInTheRegister() public {
+        bytes32 first = _pledge(500e18);
+        vm.prank(trustee);
+        liens.foreclose(first);
+
+        _pledge(400e18);
+
+        ILienRegistry.Lien memory old = liens.getLien(first);
+        assertTrue(old.foreclosed);
+        assertEq(old.amount, 500e18);
+        assertGt(old.perfectedAt, 0);
+    }
+
     // ─── Eligibility ─────────────────────────────────────────────────────────
 
     function test_ineligibleRecipientRejected() public {

@@ -99,6 +99,8 @@ library CollateralControllerErrors {
 }
 
 library LoanControllerErrors {
+    error LoanController__LoanOutlivesCollateral(uint256 dueDate, uint64 collateralMaturity);
+
     error LoanController__AmountShouldBeGreaterThanZero();
     error LoanController__NotEnoughCollateral();
     error LoanController__InsufficentFees();

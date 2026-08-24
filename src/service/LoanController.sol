@@ -95,6 +95,19 @@ contract LoanController is Ownable, ILoanController {
         );
         loan.lastUpdate = block.timestamp;
         loan.dueDate = block.timestamp + 180 days;
+
+        // A loan may not outlive the instrument securing it. A bill redeems
+        // itself at maturity, and if that lands mid-loan the proceeds reach the
+        // borrower while the debt is still outstanding — the lender's security
+        // simply evaporates. Tri-party repo solves this by matching tenor to the
+        // collateral, which is one comparison here.
+        uint64 collateralMaturity = lendingPoolContract.getAssetMaturity(tokenId);
+        if (collateralMaturity != 0 && loan.dueDate > collateralMaturity) {
+            revert LoanControllerErrors.LoanController__LoanOutlivesCollateral(
+                loan.dueDate,
+                collateralMaturity
+            );
+        }
         loan.token = lendingPoolContract.getStableCoinAddress();
         loan.loanChainId = block.chainid;
         loan.userBorrowIndex = chainIdentifier

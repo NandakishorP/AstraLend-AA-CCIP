@@ -111,3 +111,55 @@ cannot find `tooling/deployment.local.json`; re-run `deploy-local.mjs`.
 
 **A transaction reverts with `InvalidChainId`.** The deployment predates the
 allowed-chains fix. Redeploy.
+
+## Real-world asset collateral
+
+Deploy the RWA module onto a running hub, then drive the lifecycle:
+
+```bash
+# Addresses come from tooling/deployment.env, written by deploy-local.mjs.
+export LENDING_POOL=$(grep ETH_LENDING_POOL_ADDRESS tooling/deployment.env | cut -d= -f2)
+export STABLE_COIN=$(grep ETH_STABLE_COIN_ADDRESS  tooling/deployment.env | cut -d= -f2)
+
+# Anvil accounts #2 and #3. Deliberately not #0: relayer.mjs signs with the
+# deployer key continuously and anything sharing it loses the nonce race.
+export DEMO_HOLDER=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
+export SECURITY_TRUSTEE=0x90F79bf6EB2c4f870365E785982E1f101E93b906
+
+forge script script/DeployRwa.s.sol --rpc-url http://127.0.0.1:8545 --broadcast \
+  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+
+# Then export the five DEPLOY rwa* addresses it prints and run:
+RWA_TOKEN=0x… RWA_ISSUER=0x… RWA_LIENS=0x… node tooling/rwa-scenario.mjs
+```
+
+Copy the same addresses into `backend/.env` as `RWA_*_ADDRESS` for the
+`/app/collateral` page to come alive.
+
+### What the scenario proves
+
+| Step | Claim |
+| --- | --- |
+| 3 | `balanceOf` is identical before and after pledging — nothing was transferred |
+| 4 | The pledged part cannot move, and refuses with `RWAToken__Encumbered` specifically |
+| 4 | A rival protocol with a full approval also cannot pull it — so the same holding cannot back two loans |
+| 4 | The free remainder still transfers, so the charge is targeted rather than a freeze |
+| 5 | The satellite's collateral rises by exactly the pledged amount, with no token contract there at all |
+| 6 | The trustee forecloses and the instrument redeems itself — no court, no auction, no buyer |
+
+The scenario is rerunnable: it tops the holder back up, and a foreclosed charge
+does not block a later pledge.
+
+### Two constraints worth knowing
+
+**Loan tenor bounds the instrument.** `LoanController` fixes every loan at 180
+days and refuses one that would outlive its collateral, so a 91-day bill cannot
+back a standard loan at all. The demo deploys a 364-day bill for that reason.
+RBI issues 91, 182 and 364-day tenors; only the longest works until loan
+duration becomes configurable.
+
+**The lien registry's authorised caller is the CollateralController, not the
+pool proxy.** The pool delegates collateral handling, so the controller is what
+calls `createLien`. Pointing it at the proxy reverts with
+`Lien__OnlyPool(controller)`. `DeployRwa.s.sol` resolves it through
+`getCollateralControllerAddress()`.

@@ -42,6 +42,22 @@ contract LienRegistry is Ownable, ILienRegistry {
     mapping(bytes32 lienId => Lien) private s_liens;
     mapping(address borrower => mapping(address token => uint256 amount)) private s_totalEncumbered;
 
+    /**
+     * @notice How many charges have been opened over this holding historically.
+     *
+     * @dev Part of the lien id, and the reason a borrower can pledge again after
+     *      a foreclosure. Without it the id is a pure function of borrower and
+     *      asset, so the slot stays occupied forever and anyone foreclosed once
+     *      is permanently barred from posting that asset again — which is not
+     *      how credit works anywhere.
+     *
+     *      Incremented on close rather than on open, so an open charge keeps a
+     *      stable id for its whole life while the register stays append-only.
+     *      A register that overwrote its own history would not be much of a
+     *      register.
+     */
+    mapping(address borrower => mapping(address token => uint256)) private s_pledgeSequence;
+
     address private s_pool;
     address private s_securityTrustee;
 
@@ -154,6 +170,7 @@ contract LienRegistry is Ownable, ILienRegistry {
 
         lien.releasedAt = uint64(block.timestamp);
         s_totalEncumbered[lien.borrower][lien.token] -= lien.amount;
+        s_pledgeSequence[lien.borrower][lien.token] += 1;
 
         IRWAToken(lien.token).release(lien.borrower, lien.amount);
 
@@ -173,6 +190,7 @@ contract LienRegistry is Ownable, ILienRegistry {
         lien.foreclosed = true;
         lien.releasedAt = uint64(block.timestamp);
         s_totalEncumbered[lien.borrower][lien.token] -= lien.amount;
+        s_pledgeSequence[lien.borrower][lien.token] += 1;
 
         IRWAToken(lien.token).forcedTransfer(lien.borrower, msg.sender, lien.amount, lienId);
 
@@ -186,8 +204,19 @@ contract LienRegistry is Ownable, ILienRegistry {
         if (lien.releasedAt != 0) revert Lien__AlreadyReleased(lienId);
     }
 
-    function computeLienId(address borrower, address token, bytes32 loanRef) public pure returns (bytes32) {
-        return keccak256(abi.encode(borrower, token, loanRef));
+    /**
+     * @notice Id of the charge currently open, or the next one to be opened.
+     * @dev Not `pure`: it depends on how many charges have already closed over
+     *      this holding. Callers deciding between opening and deepening should
+     *      pair this with `isActive`.
+     */
+    function computeLienId(address borrower, address token, bytes32 loanRef) public view returns (bytes32) {
+        return keccak256(abi.encode(borrower, token, loanRef, s_pledgeSequence[borrower][token]));
+    }
+
+    /// @notice Charges opened over this holding so far, closed or otherwise.
+    function pledgeSequence(address borrower, address token) external view returns (uint256) {
+        return s_pledgeSequence[borrower][token];
     }
 
     function getLien(bytes32 lienId) external view returns (Lien memory) {
@@ -203,6 +232,12 @@ contract LienRegistry is Ownable, ILienRegistry {
         return s_totalEncumbered[borrower][token];
     }
 
+    /**
+     * @notice The contract permitted to create and release charges.
+     * @dev This is the pool's CollateralController, not the pool proxy. The pool
+     *      delegates collateral handling, so the controller is the actual
+     *      caller; resolve it with getCollateralControllerAddress().
+     */
     function setPool(address pool) external onlyOwner {
         if (pool == address(0)) revert Lien__ZeroAddress();
         s_pool = pool;

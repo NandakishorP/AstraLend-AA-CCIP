@@ -30,7 +30,7 @@ interface ILienRegistry {
 
     function releaseLien(bytes32 lienId) external;
 
-    function computeLienId(address borrower, address token, bytes32 loanRef) external pure returns (bytes32);
+    function computeLienId(address borrower, address token, bytes32 loanRef) external view returns (bytes32);
 
     function getLien(bytes32 lienId) external view returns (Lien memory);
 

@@ -22,7 +22,5 @@ interface ICollateralController {
         uint256 amount
     ) external payable;
 
-    function releaseRwaCollateral(address tokenAddress, address user, uint256 amount) external;
-
     function setLienRegistry(address lienRegistry_) external;
 }
