@@ -21,3 +21,6 @@ docs/
 
 # Timestamped broadcast runs. run-latest.json is enough to keep.
 /broadcast/**/run-[0-9]*.json
+
+# Scenario script output — local run state, regenerated on demand.
+/broadcast/Scenarios.s.sol/
