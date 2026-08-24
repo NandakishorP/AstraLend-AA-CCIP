@@ -14,4 +14,15 @@ interface ICollateralController {
         uint64 tokenId,
         uint256 amount
     ) external payable;
+
+    function depositRwaCollateral(
+        address tokenAddress,
+        uint64 tokenId,
+        address sender,
+        uint256 amount
+    ) external payable;
+
+    function releaseRwaCollateral(address tokenAddress, address user, uint256 amount) external;
+
+    function setLienRegistry(address lienRegistry_) external;
 }

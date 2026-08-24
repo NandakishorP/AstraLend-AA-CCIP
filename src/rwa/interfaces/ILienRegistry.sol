@@ -24,7 +24,13 @@ interface ILienRegistry {
         external
         returns (bytes32 lienId);
 
+    function increaseLien(bytes32 lienId, uint256 amount) external;
+
+    function decreaseLien(bytes32 lienId, uint256 amount) external;
+
     function releaseLien(bytes32 lienId) external;
+
+    function computeLienId(address borrower, address token, bytes32 loanRef) external pure returns (bytes32);
 
     function getLien(bytes32 lienId) external view returns (Lien memory);
 

@@ -64,8 +64,12 @@ contract LoanController is Ownable, ILoanController {
                 tokenId
             );
 
-        uint256 collateralAvailableForLending = (depositedCollateral * LTV) /
-            PRECISION;
+        // Per-asset LTV, not one ratio for the whole protocol. A 91-day
+        // government bill and a volatile crypto asset cannot share a haircut;
+        // the pool falls back to the old constant for anything unconfigured,
+        // so existing assets are unaffected.
+        uint256 collateralAvailableForLending = (depositedCollateral *
+            lendingPoolContract.getLtv(tokenId)) / PRECISION;
         uint256 collateralAvailableForLendingInUsd = lendingPoolContract
             .getUsdValue(tokenId, collateralAvailableForLending);
         if (amount > collateralAvailableForLendingInUsd) {

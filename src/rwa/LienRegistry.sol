@@ -37,6 +37,7 @@ contract LienRegistry is Ownable, ILienRegistry {
     error Lien__ZeroAmount();
     error Lien__ZeroAddress();
     error Lien__DuplicateLien(bytes32 lienId);
+    error Lien__DecreaseExceedsLien(uint256 outstanding, uint256 requested);
 
     mapping(bytes32 lienId => Lien) private s_liens;
     mapping(address borrower => mapping(address token => uint256 amount)) private s_totalEncumbered;
@@ -52,6 +53,8 @@ contract LienRegistry is Ownable, ILienRegistry {
         bytes32 loanRef,
         uint64 perfectedAt
     );
+    event LienIncreased(bytes32 indexed lienId, address indexed borrower, uint256 added, uint256 total);
+    event LienDecreased(bytes32 indexed lienId, address indexed borrower, uint256 removed, uint256 total);
     event LienReleased(bytes32 indexed lienId, address indexed borrower, uint256 amount, uint64 releasedAt);
     event LienForeclosed(bytes32 indexed lienId, address indexed borrower, address indexed trustee, uint256 amount);
     event PoolSet(address indexed pool);
@@ -104,6 +107,45 @@ contract LienRegistry is Ownable, ILienRegistry {
         IRWAToken(token).encumber(borrower, amount);
 
         emit LienCreated(lienId, borrower, token, amount, loanRef, uint64(block.timestamp));
+    }
+
+    /**
+     * @notice Adds to an existing charge.
+     * @dev The pool aggregates collateral per (user, asset) rather than per
+     *      loan, so a borrower topping up a position should deepen the existing
+     *      charge rather than accumulate a second one. Legally this is the same
+     *      pledge for a larger amount, which is what a running account charge
+     *      looks like.
+     */
+    function increaseLien(bytes32 lienId, uint256 amount) external onlyPool {
+        if (amount == 0) revert Lien__ZeroAmount();
+        Lien storage lien = _activeLien(lienId);
+
+        lien.amount += amount;
+        s_totalEncumbered[lien.borrower][lien.token] += amount;
+
+        IRWAToken(lien.token).encumber(lien.borrower, amount);
+
+        emit LienIncreased(lienId, lien.borrower, amount, lien.amount);
+    }
+
+    /**
+     * @notice Partially discharges a charge, freeing that much of the holding.
+     * @dev Used when a borrower withdraws part of their collateral. Reducing to
+     *      zero leaves the lien active with no amount rather than releasing it,
+     *      so the register keeps a continuous record of the relationship.
+     */
+    function decreaseLien(bytes32 lienId, uint256 amount) external onlyPool {
+        if (amount == 0) revert Lien__ZeroAmount();
+        Lien storage lien = _activeLien(lienId);
+        if (amount > lien.amount) revert Lien__DecreaseExceedsLien(lien.amount, amount);
+
+        lien.amount -= amount;
+        s_totalEncumbered[lien.borrower][lien.token] -= amount;
+
+        IRWAToken(lien.token).release(lien.borrower, amount);
+
+        emit LienDecreased(lienId, lien.borrower, amount, lien.amount);
     }
 
     /// @notice Lifts a charge once the debt it secures is discharged.

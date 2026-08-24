@@ -79,6 +79,9 @@ contract LendingPoolContract is
     mapping(uint64 tokenId => uint256 amountBorrowed)
         private s_amountBorrowedInToken;
 
+    mapping(uint64 tokenId => RiskParams) private s_riskParams;
+    address private s_lienRegistry;
+
     mapping(uint64 tokenId => address tokenAddress) private s_tokenAddresses;
     mapping(address tokenAddress => uint64 tokenId) private s_tokenId;
 
@@ -348,6 +351,112 @@ contract LendingPoolContract is
         );
     }
 
+    /**
+     * @notice Registers a real-world asset as acceptable collateral.
+     * @param valuationOracle An IRWAValuation, which satisfies
+     *        AggregatorV3Interface — so it slots straight into s_priceFeed and
+     *        every existing pricing path keeps working untouched.
+     * @dev Assets were previously fixed by a loop in initialize with no way to
+     *      add one afterwards. This is that missing path, restricted to RWA so
+     *      the crypto asset set stays exactly as deployed.
+     */
+    function addRwaAsset(
+        uint64 tokenId,
+        address tokenAddress,
+        address valuationOracle,
+        uint256 ltv,
+        uint256 liquidationThreshold
+    ) external onlyOwner {
+        if (tokenAddress == address(0) || valuationOracle == address(0)) {
+            revert LendingPoolContractErrors.LendingPool__InvalidAddress();
+        }
+
+        s_priceFeed[tokenId] = valuationOracle;
+        s_tokenAddresses[tokenId] = tokenAddress;
+        s_tokenId[tokenAddress] = tokenId;
+        s_tokenAddressesList.push(tokenAddress);
+        s_riskParams[tokenId] = RiskParams({
+            ltv: ltv,
+            liquidationThreshold: liquidationThreshold,
+            assetType: AssetType.RWA,
+            configured: true
+        });
+
+        emit RwaAssetAdded(tokenId, tokenAddress, valuationOracle, ltv, liquidationThreshold);
+    }
+
+    /**
+     * @notice Posts a real-world asset as collateral without transferring it.
+     *
+     * @dev The borrower keeps the tokens. A charge is recorded against their
+     *      balance instead, mirroring the recorded pledge of dematerialised
+     *      securities under the Depositories Act 1996 s.12 — the security stays
+     *      in the pledgor's own account and the register does the work.
+     *
+     *      Hub-only by construction. The instrument exists on this chain and
+     *      nowhere else, which is precisely why it never needs bridging: only
+     *      the fact of the charge travels, as a message. Borrowing against it
+     *      on a satellite needs no change, because the satellite already reads
+     *      mirrored collateral.
+     */
+    function depositRwaCollateral(
+        uint64 tokenId,
+        uint256 amount
+    )
+        external
+        payable
+        isGreaterThanZero(amount)
+        isTokenApprovedByTheContract(tokenId)
+        nonReentrant
+    {
+        if (s_riskParams[tokenId].assetType != AssetType.RWA) {
+            revert LendingPoolContractErrors.LendingPool__NotAnRwaAsset(tokenId);
+        }
+        if (block.chainid != ethChainId) {
+            revert LendingPoolContractErrors.LendingPool__RwaCollateralIsHubOnly(block.chainid);
+        }
+
+        collateralController.depositRwaCollateral{value: msg.value}(
+            s_tokenAddresses[tokenId],
+            tokenId,
+            msg.sender,
+            amount
+        );
+    }
+
+    /**
+     * @notice Loan-to-value for an asset.
+     * @dev Falls back to the protocol-wide constant for anything without
+     *      configured parameters, so every asset deployed before this existed
+     *      behaves exactly as it did.
+     */
+    function getLtv(uint64 tokenId) public view returns (uint256) {
+        RiskParams memory params = s_riskParams[tokenId];
+        return params.configured ? params.ltv : LTV;
+    }
+
+    function getLiquidationThreshold(uint64 tokenId) public view returns (uint256) {
+        RiskParams memory params = s_riskParams[tokenId];
+        return params.configured ? params.liquidationThreshold : LIQUIDATION_THRESHOLD;
+    }
+
+    function getRiskParams(uint64 tokenId) external view returns (RiskParams memory) {
+        return s_riskParams[tokenId];
+    }
+
+    function isRwaAsset(uint64 tokenId) external view returns (bool) {
+        return s_riskParams[tokenId].assetType == AssetType.RWA && s_riskParams[tokenId].configured;
+    }
+
+    function setLienRegistry(address lienRegistry) external onlyOwner {
+        s_lienRegistry = lienRegistry;
+        collateralController.setLienRegistry(lienRegistry);
+    }
+
+    function getLienRegistry() external view returns (address) {
+        return s_lienRegistry;
+    }
+
     function getCollateralDetailsOfUser(
         uint256 chainId,
         address user,
@@ -580,6 +689,39 @@ contract LendingPoolContract is
                     tokenId
                 );
     }
+    /**
+     * @notice How an asset is held when posted as collateral.
+     * @dev CRYPTO transfers into the Vault. RWA does not move at all — a charge
+     *      is recorded against the holder's balance instead. The distinction
+     *      exists because a pool that holds a regulated instrument becomes its
+     *      holder of record, which is the outcome the whole design avoids.
+     */
+    enum AssetType {
+        CRYPTO,
+        RWA
+    }
+
+    event RwaAssetAdded(
+        uint64 indexed tokenId,
+        address indexed tokenAddress,
+        address indexed valuationOracle,
+        uint256 ltv,
+        uint256 liquidationThreshold
+    );
+
+    /**
+     * @notice Per-asset risk, replacing the single protocol-wide LTV.
+     * @dev A 91-day government bill and a volatile crypto asset cannot share a
+     *      loan-to-value ratio. This is what makes 95% against a T-bill and 75%
+     *      against WETH expressible at the same time.
+     */
+    struct RiskParams {
+        uint256 ltv;
+        uint256 liquidationThreshold;
+        AssetType assetType;
+        bool configured;
+    }
+
     enum ActionType {
         TRANSFER,
         DEPOSIT_LIQUIDITY,
@@ -587,7 +729,9 @@ contract LendingPoolContract is
         DEPOSIT_COLLATERAL,
         WITHDRAW_COLLATERAL,
         LOAN_TAKEN,
-        LOAN_REPAYMENT
+        LOAN_REPAYMENT,
+        LIEN_CREATED,
+        LIEN_RELEASED
     }
     struct CrossChainPayLoad {
         ActionType actionType;

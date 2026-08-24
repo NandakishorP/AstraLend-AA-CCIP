@@ -1,6 +1,10 @@
 pragma solidity ^0.8.24;
 
 library LendingPoolContractErrors {
+    error LendingPool__NotAnRwaAsset(uint64 tokenId);
+    error LendingPool__RwaCollateralIsHubOnly(uint256 chainId);
+    error LendingPool__InvalidAddress();
+
     error LendingPoolContract__AmountShouldBeGreaterThanZero();
     error LendingPoolContract__TokenIsNotAllowedToDeposit();
     error LendingPoolContract__TokenAddressAndPriceFeedAddressMismatch(

@@ -61,4 +61,8 @@ interface ILendingPoolContract {
         address user,
         uint64 tokenId
     ) external view returns (uint256);
+
+    function getLtv(uint64 tokenId) external view returns (uint256);
+
+    function getLiquidationThreshold(uint64 tokenId) external view returns (uint256);
 }

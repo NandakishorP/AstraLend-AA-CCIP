@@ -156,6 +156,54 @@ contract RWACollateralTest is Test {
         liens.createLien(alice, address(token), 100e18, LOAN_REF);
     }
 
+    // ─── Running-account charge ──────────────────────────────────────────────
+
+    /// The pool aggregates collateral per (user, asset), so topping up must
+    /// deepen the existing charge rather than open a second one.
+    function test_increaseLienDeepensTheSameCharge() public {
+        bytes32 lienId = _pledge(500e18);
+
+        vm.prank(pool);
+        liens.increaseLien(lienId, 300e18);
+
+        assertEq(token.encumberedOf(alice), 800e18);
+        assertEq(token.freeBalanceOf(alice), 200e18);
+        assertEq(liens.getLien(lienId).amount, 800e18);
+        assertEq(liens.totalEncumberedBy(alice, address(token)), 800e18);
+    }
+
+    function test_decreaseLienFreesCollateral() public {
+        bytes32 lienId = _pledge(800e18);
+
+        vm.prank(pool);
+        liens.decreaseLien(lienId, 300e18);
+
+        assertEq(token.encumberedOf(alice), 500e18);
+        assertEq(token.freeBalanceOf(alice), 500e18);
+
+        vm.prank(alice);
+        token.transfer(bob, 500e18);
+        assertEq(token.balanceOf(bob), 500e18);
+    }
+
+    function test_cannotDecreaseBeyondTheCharge() public {
+        bytes32 lienId = _pledge(500e18);
+
+        vm.prank(pool);
+        vm.expectRevert(abi.encodeWithSelector(LienRegistry.Lien__DecreaseExceedsLien.selector, 500e18, 600e18));
+        liens.decreaseLien(lienId, 600e18);
+    }
+
+    function test_increaseCannotExceedHolding() public {
+        bytes32 lienId = _pledge(800e18);
+
+        vm.prank(pool);
+        vm.expectRevert(
+            abi.encodeWithSelector(RWAToken.RWAToken__OverEncumbered.selector, ALICE_HOLDING, 800e18, 300e18)
+        );
+        liens.increaseLien(lienId, 300e18);
+    }
+
     // ─── Access control on the charge ────────────────────────────────────────
 
     function test_onlyLienRegistryCanEncumber() public {
