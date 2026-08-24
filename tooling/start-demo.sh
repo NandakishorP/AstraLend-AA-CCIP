@@ -48,8 +48,11 @@ wait_for() { # wait_for <url> <label>
 }
 
 # ── Chains ────────────────────────────────────────────────────────────────────
-say "starting hub chain (Ethereum Sepolia id) on :8545"
-start anvil-eth.log anvil --chain-id 11155111 --port 8545 --silent
+# 424242, not Sepolia's 11155111. Running a local node under a real network's
+# chain id makes wallets treat it as that network — MetaMask priced gas in real
+# SepoliaETH and failed every transaction on a balance the account did not have.
+say "starting hub chain (id 424242) on :8545"
+start anvil-eth.log anvil --chain-id 424242 --port 8545 --silent
 
 say "starting satellite chain (Arbitrum Sepolia id) on :8546"
 start anvil-arb.log anvil --chain-id 421614 --port 8546 --silent
@@ -80,6 +83,9 @@ sed -i '' \
   -e 's|^PORT=.*|PORT=3001|' \
   "$ROOT/backend/.env"
 
+say "deploying the real-world asset module to both chains"
+node "$ROOT/tooling/deploy-rwa.mjs"
+
 # ── Services ──────────────────────────────────────────────────────────────────
 say "starting CCIP relayer"
 start relayer.log node "$ROOT/tooling/relayer.mjs"
@@ -101,11 +107,17 @@ cat <<BANNER
     API docs         http://localhost:3001/docs
     relayer status   http://localhost:8547/messages
 
-    hub chain        http://localhost:8545   (chain id 11155111)
+    hub chain        http://localhost:8545   (chain id 424242)
     satellite chain  http://localhost:8546   (chain id 421614)
 
     demo wallet      0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
     private key      $DEPLOYER_KEY
+
+    RWA holder       0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC   (anvil #2)
+    security trustee 0x90F79bf6EB2c4f870365E785982E1f101E93b906   (anvil #3)
+
+  Drive the RWA lifecycle with:
+    source tooling/rwa.env && node tooling/rwa-scenario.mjs
 
   Logs are in tooling/logs/. Press Ctrl-C to stop everything.
 

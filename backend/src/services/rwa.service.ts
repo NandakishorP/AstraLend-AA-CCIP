@@ -184,6 +184,8 @@ export async function getHolding(userAddress: string): Promise<RwaHolding> {
 
 export interface LienView {
   lienId: string;
+  /** Which charge in the holder's history this is, counting from zero. */
+  sequence: number;
   borrower: string;
   tokenAddress: string;
   amount: string;
@@ -194,37 +196,64 @@ export interface LienView {
   active: boolean;
 }
 
+const PLEDGE_REF = ethers.keccak256(ethers.toUtf8Bytes("ASTRALEND_COLLATERAL_PLEDGE"));
+
 /**
- * The borrower's charge, read from the register.
+ * Lien id for a specific point in the holder's pledge history.
+ *
+ * Computed client-side because the contract's `computeLienId` only ever answers
+ * for the *current* sequence, and reading closed charges means asking about
+ * earlier ones.
+ */
+function lienIdAt(borrower: string, tokenAddress: string, sequence: number): string {
+  return ethers.keccak256(
+    ethers.AbiCoder.defaultAbiCoder().encode(
+      ["address", "address", "bytes32", "uint256"],
+      [borrower, tokenAddress, PLEDGE_REF, sequence]
+    )
+  );
+}
+
+/**
+ * The borrower's most recent charge, open or closed.
  *
  * One running-account lien per (borrower, asset), matching how the pool
  * aggregates collateral — topping up deepens the same pledge rather than
- * opening another.
+ * opening another. When a charge closes the sequence advances, so the current
+ * id points at a charge that does not exist yet; falling back one step is what
+ * makes a foreclosed or released lien still readable. The register is
+ * append-only and the UI should be able to show that.
  */
 export async function getLien(userAddress: string): Promise<LienView | null> {
   const registry = lienRegistry();
   const tokenAddress = requireAddress(env.RWA_TOKEN_ADDRESS, "RWA_TOKEN_ADDRESS");
-  const pledgeRef = ethers.keccak256(ethers.toUtf8Bytes("ASTRALEND_COLLATERAL_PLEDGE"));
 
-  const lienId: string = await registry.computeLienId(userAddress, tokenAddress, pledgeRef);
-  const lien = await registry.getLien(lienId);
+  const sequence = Number(await registry.pledgeSequence(userAddress, tokenAddress));
 
-  if (lien.perfectedAt === 0n) return null;
+  // Current charge first; if none is open, the one that just closed.
+  const candidates = sequence > 0 ? [sequence, sequence - 1] : [sequence];
 
-  const rwa = token();
-  const decimals = Number(await rwa.decimals());
+  for (const seq of candidates) {
+    const lienId = lienIdAt(userAddress, tokenAddress, seq);
+    const lien = await registry.getLien(lienId);
+    if (lien.perfectedAt === 0n) continue;
 
-  return {
-    lienId,
-    borrower: lien.borrower,
-    tokenAddress: lien.token,
-    amount: ethers.formatUnits(lien.amount, decimals),
-    loanRef: lien.loanRef,
-    perfectedAt: Number(lien.perfectedAt),
-    releasedAt: lien.releasedAt > 0n ? Number(lien.releasedAt) : null,
-    foreclosed: lien.foreclosed,
-    active: lien.perfectedAt > 0n && lien.releasedAt === 0n && !lien.foreclosed,
-  };
+    const decimals = Number(await token().decimals());
+    return {
+      lienId,
+      sequence: seq,
+      borrower: lien.borrower,
+      tokenAddress: lien.token,
+      amount: ethers.formatUnits(lien.amount, decimals),
+      loanRef: lien.loanRef,
+      perfectedAt: Number(lien.perfectedAt),
+      releasedAt: lien.releasedAt > 0n ? Number(lien.releasedAt) : null,
+      foreclosed: lien.foreclosed,
+      active: lien.releasedAt === 0n && !lien.foreclosed,
+    };
+  }
+
+  return null;
 }
 
 export function isConfigured(): boolean {

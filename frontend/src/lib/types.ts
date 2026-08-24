@@ -453,6 +453,8 @@ export interface NavSnapshot {
 
 export interface LienView {
   lienId: string;
+  /** Which charge in the holder's history this is, counting from zero. */
+  sequence: number;
   borrower: string;
   tokenAddress: string;
   amount: string;

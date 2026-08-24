@@ -8,3 +8,6 @@ logs/
 # each run, so these are machine state, not source.
 deployment.env
 deployment.local.json
+
+# Written by deploy-rwa.mjs on every run.
+rwa.env
