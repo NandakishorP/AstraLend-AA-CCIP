@@ -214,6 +214,11 @@ contract CrossChainLending is Test {
             lendingPoolContractSepolia.getCrossChainMessageSenderAddress()
         );
 
+        // checkUpkeep prices collateral through the pool, so the GSM needs a
+        // pointer back to it. Without this it holds address(0) and the keeper
+        // path reverts on the first getUsdValue call.
+        GSM.setLendingPoolContractAddress(address(lendingPoolContractSepolia));
+
         GSM.setAllowedChains(address(lendingPoolContractSepolia));
         GSM.setAllowedChains(
             address(lendingPoolContractSepolia.getCCIPRequestHanlderAddress())
