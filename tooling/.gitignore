@@ -1,0 +1,10 @@
+# Installed by `npm install` inside tooling/ — never commit.
+node_modules/
+
+# Runtime logs from start-demo.sh (anvil, backend, frontend, relayer).
+logs/
+
+# Written by deploy-local.mjs on every local deployment. Addresses change
+# each run, so these are machine state, not source.
+deployment.env
+deployment.local.json

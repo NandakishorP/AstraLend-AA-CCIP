@@ -12,3 +12,12 @@ docs/
 
 # Dotenv file
 .env
+
+# macOS Finder metadata
+.DS_Store
+
+# Local Anvil hub chain — same reasoning as the 31337 rule above.
+/broadcast/*/424242/
+
+# Timestamped broadcast runs. run-latest.json is enough to keep.
+/broadcast/**/run-[0-9]*.json
