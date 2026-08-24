@@ -1,0 +1,38 @@
+diff --git a/src/ccip/CCIPLocalSimulatorFork.sol b/src/ccip/CCIPLocalSimulatorFork.sol
+index 5717ee4..79bb10c 100644
+--- a/src/ccip/CCIPLocalSimulatorFork.sol
++++ b/src/ccip/CCIPLocalSimulatorFork.sol
+@@ -158,6 +158,16 @@ contract CCIPLocalSimulatorFork is Test {
+         forkIds[0] = forkId;
+ 
+         _routeCapturedMessages(forkIds, sourceForkId, sourceRouterAddress);
++
++        // LOCAL PATCH (behaviour regression, chainlink-local v0.2.5 .. v0.2.9):
++        // this overload documents that it "switches to a destination network
++        // fork", and through v0.2.4 it did so unconditionally. Since the routing
++        // rewrite, the fork is only selected inside the match loop, so a call
++        // that finds no unprocessed message silently leaves the source fork
++        // active — breaking callers that rely on the documented switch. The
++        // multi-fork overload deliberately keeps the new behaviour, since it has
++        // no single unambiguous destination.
++        vm.selectFork(forkId);
+     }
+ 
+     /**
+@@ -415,7 +425,15 @@ contract CCIPLocalSimulatorFork is Test {
+         }
+         Internal.Any2EVMRampMessage memory any2EVMRampMessage = Internal.Any2EVMRampMessage({
+             header: message.header,
+-            sender: abi.encodePacked(message.sender),
++            // LOCAL PATCH (upstream bug, chainlink-local <= v0.2.9):
++            // production OffRamps deliver an EVM lane's `sender` as a 32-byte
++            // abi.encode(address) word — see NonceManager.sol, which decodes this
++            // very field with abi.decode(sender, (address)). abi.encodePacked
++            // yields 20 bytes, so any receiver following the documented
++            // `abi.decode(message.sender, (address))` pattern reverts with no
++            // error data. v0.2.9 fixed this same class of bug for `receiver`,
++            // `destTokenAddress` and `sourcePoolAddress` but missed `sender`.
++            sender: abi.encode(message.sender),
+             data: message.data,
+             receiver: _decodeEVMAddress(message.receiver),
+             gasLimit: gasLimit,
