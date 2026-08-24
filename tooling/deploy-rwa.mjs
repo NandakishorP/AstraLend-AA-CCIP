@@ -67,6 +67,7 @@ async function main() {
     STABLE_COIN: deployment.chains.eth.stableCoin,
     DEMO_HOLDER: HOLDER,
     SECURITY_TRUSTEE: TRUSTEE,
+    GSM: deployment.chains.eth.gsm,
   });
   log(`  token ${hub.rwaToken}  registry ${hub.rwaLienRegistry}`);
 
@@ -87,6 +88,7 @@ async function main() {
   const satellite = forgeScript("script/DeployRwaSatellite.s.sol", CHAINS.arb.rpcUrl, {
     LENDING_POOL: deployment.chains.arb.lendingPool,
     RWA_TOKEN: hub.rwaToken,
+    STATE_AGGREGATOR: deployment.chains.arb.stateAggregator,
     ...curve,
   });
   log(`  valuation ${satellite.rwaNavOracleSatellite} (same curve, no bridge)`);

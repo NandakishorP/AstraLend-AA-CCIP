@@ -129,6 +129,23 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         _;
     }
 
+    /**
+     * @notice Starts the borrower index for a newly registered asset.
+     *
+     * @dev Interest accrual is index-based: repayment scales the principal by
+     *      currentIndex / userBorrowIndex. An index of zero therefore does not
+     *      merely mispriceInterest, it makes repayment revert with a
+     *      divide-by-zero panic — the asset can be borrowed against and never
+     *      repaid.
+     *
+     *      initialize only ever seeded token 0, which was invisible while the
+     *      asset set was fixed at deployment. Any asset added afterwards needs
+     *      this, and addRwaAsset calls it.
+     */
+    function setInitialBorrowerIndex(uint64 tokenId) external onlyOwner {
+        interestRateManager.setInitalBorrowerIndex(tokenId);
+    }
+
     function setAllowedChains(address sender) external onlyOwner {
         if (sender != address(0)) {
             s_isAllowedToCall[sender] = true;

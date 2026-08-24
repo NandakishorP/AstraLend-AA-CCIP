@@ -100,4 +100,5 @@ interface IStateAggregator {
         uint64 tokenId,
         uint256 loanId
     ) external view returns (LoanManager.LoanDetails memory);
+    function setInitialBorrowerIndex(uint64 tokenId) external;
 }

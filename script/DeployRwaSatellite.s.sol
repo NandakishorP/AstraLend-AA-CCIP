@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import {Script, console} from "forge-std/Script.sol";
 import {TBillNavOracle} from "../src/rwa/TBillNavOracle.sol";
 import {LendingPoolContract} from "../src/LendingPoolContract.sol";
+import {IStateAggregator} from "../src/interfaces/IStateAggregator.sol";
 
 /**
  * Registers the hub's instrument on a satellite so it can be borrowed against.
@@ -65,6 +66,10 @@ contract DeployRwaSatellite is Script {
             RWA_LTV,
             RWA_LIQUIDATION_THRESHOLD
         );
+
+        // Same reasoning as the hub: the satellite stamps loans with this index
+        // and repayment divides by it.
+        IStateAggregator(vm.envAddress("STATE_AGGREGATOR")).setInitialBorrowerIndex(RWA_TOKEN_ID);
 
         vm.stopBroadcast();
 

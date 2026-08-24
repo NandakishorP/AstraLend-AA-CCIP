@@ -143,4 +143,5 @@ interface IGlobalStateManager {
     function getTotalBorrowedPerToken(
         uint64 tokenId
     ) external view returns (uint256);
+    function setInitialBorrowerIndex(uint64 tokenId) external;
 }

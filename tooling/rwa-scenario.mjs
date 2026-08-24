@@ -78,6 +78,11 @@ const POOL_ABI = [
   "function getAssetMaturity(uint64) view returns (uint64)",
   "function isRwaAsset(uint64) view returns (bool)",
   "function getUsdValue(uint64,uint256) view returns (uint256)",
+  "function repayLoan(uint256 loanChainId, uint64 tokenId, uint256 amount, uint256 loanId) payable",
+  "function withdrawCollateral(uint64 tokenId, uint256 amount) payable",
+  "function getUserLoanCount(uint256,address,uint64) view returns (uint256)",
+  "function getBorrowerIndex(uint64) returns (uint256)",
+  "function getLoanDetails(uint256,address,uint64,uint256) view returns (tuple(address token,uint256 amountBorrowedInUSDT,uint256 principalAmount,uint256 collateralUsed,uint256 collateralChainId,uint256 lastUpdate,address asset,uint256 userBorrowIndex,uint256 interestPaid,uint256 liquidationPoint,uint256 loanChainId,uint256 dueDate,bool isClosed,uint256 loanId,uint8 penaltyCount,bool isLiquidated))",
 ];
 const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -172,6 +177,27 @@ async function send(contract, method, args = [], overrides = {}) {
   }
 }
 
+/**
+ * Polls until a cross-chain effect lands, instead of sleeping a fixed interval.
+ *
+ * Delivery latency is not fixed — the relayer batches, and the round trip for a
+ * loan is satellite → hub → satellite. A flat sleep either wastes time or reads
+ * state that has not arrived, which is how the loan count came back as zero
+ * immediately after a borrow that had in fact succeeded.
+ */
+async function waitUntil(label, read, ok_, timeoutMs = 30_000) {
+  const started = Date.now();
+  let last;
+  while (Date.now() - started < timeoutMs) {
+    last = await read();
+    if (ok_(last)) return last;
+    process.stdout.write(`   \x1b[36m⇢\x1b[0m waiting for ${label}…\r`);
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  process.stdout.write("\r\x1b[K");
+  throw new Error(`timed out waiting for ${label} (last value: ${last})`);
+}
+
 async function settle(label = "cross-chain message") {
   process.stdout.write(`   \x1b[36m⇢\x1b[0m waiting for ${label}…`);
   await new Promise((r) => setTimeout(r, 6000));
@@ -188,6 +214,7 @@ async function main() {
     staticNetwork: ethers.Network.from(CHAINS.arb.chainId),
   });
 
+  const satVault = JSON.parse(fs.readFileSync(DEPLOYMENT_FILE, "utf8")).chains.arb.vault;
   const holder = new ethers.Wallet(HOLDER.privateKey, hub);
   const holderOnSat = new ethers.Wallet(HOLDER.privateKey, sat);
   const trustee = new ethers.Wallet(TRUSTEE.privateKey, hub);
@@ -202,6 +229,7 @@ async function main() {
   const pool = new ethers.Contract(deployment.chains.eth.lendingPool, POOL_ABI, holder);
   const satPool = new ethers.Contract(deployment.chains.arb.lendingPool, POOL_ABI, holderOnSat);
   const stable = new ethers.Contract(deployment.chains.eth.stableCoin, ERC20_ABI, holder);
+  const satStable = new ethers.Contract(deployment.chains.arb.stableCoin, ERC20_ABI, holderOnSat);
 
   // ─── 1 ────────────────────────────────────────────────────────────────────
   step("The instrument");
@@ -358,8 +386,6 @@ async function main() {
 
   // The satellite's vault is what actually pays out, so it needs stablecoin.
   // Locally we mint it; in a real deployment it is supplied liquidity.
-  const satVault = deployment.chains.arb.vault;
-  const satStable = new ethers.Contract(deployment.chains.arb.stableCoin, ERC20_ABI, holderOnSat);
   const satPoolAddress = deployment.chains.arb.lendingPool;
   if ((await satStable.balanceOf(satVault)) < ethers.parseEther("50000")) {
     await sat.send("anvil_impersonateAccount", [satPoolAddress]);
@@ -375,6 +401,13 @@ async function main() {
 
   const borrowAmount = ethers.parseEther("50000");
   const balanceBefore = await satStable.balanceOf(holder.address);
+
+  // Captured before the borrow. Waiting on `count > 0` afterwards would be
+  // satisfied instantly by any loan an earlier run left behind, and the id
+  // would point at that one instead of this one.
+  const loanCountBefore = await satPool.getUserLoanCount(
+    CHAINS.arb.chainId, holder.address, RWA_TOKEN_ID
+  );
 
   await send(satPool, "borrowLoan", [CHAINS.eth.chainId, RWA_TOKEN_ID, borrowAmount], { value: CCIP_FEE });
 
@@ -394,18 +427,149 @@ async function main() {
   note(`meanwhile on the hub: balance ${tk(stillHeld)}, encumbered ${tk(stillCharged)} — untouched`);
 
   // ─── 6 ────────────────────────────────────────────────────────────────────
-  step("Default and foreclosure");
+  // ─── 6 ────────────────────────────────────────────────────────────────────
+  step("Repay the loan on the satellite");
+
+  // The loan is recorded on the hub and mirrored back, so it is not readable
+  // the instant borrowLoan returns. The counter and the details arrive
+  // separately, so waiting on the counter alone yields an empty struct — poll
+  // the loan itself.
+  // Two waits, and both are needed.
+  //
+  // Loan ids are 1-based — the counter advances before the record is written,
+  // so the newest loan sits at id == count, and `count - 1` reads an empty
+  // struct rather than failing. And the counter itself is mirrored back from
+  // the hub, so reading it the instant borrowLoan returns gives 0, which then
+  // pins the id to a slot that will never be filled.
+  const loanCount = await waitUntil(
+    "the loan counter to settle back to the satellite",
+    () => satPool.getUserLoanCount(CHAINS.arb.chainId, holder.address, RWA_TOKEN_ID),
+    (count) => count > loanCountBefore
+  );
+  const loanId = loanCount;
+
+  const loanBefore = await waitUntil(
+    "the loan record to settle back to the satellite",
+    () => satPool.getLoanDetails(CHAINS.arb.chainId, holder.address, RWA_TOKEN_ID, loanId),
+    (loan) => loan.amountBorrowedInUSDT > 0n
+  );
+  process.stdout.write("\r\x1b[K");
+  note(`loan #${loanId} outstanding ${tk(loanBefore.amountBorrowedInUSDT)} SC, due ${new Date(Number(loanBefore.dueDate) * 1000).toDateString()}`);
+
+  // Interest means the payoff exceeds what was borrowed, so the loan proceeds
+  // alone can never settle it — a borrower funds interest from elsewhere. Give
+  // the holder a small float; without it repayment fails on
+  // ERC20InsufficientBalance for a few wei of accrued interest.
+  await sat.send("anvil_impersonateAccount", [satPoolAddress]);
+  await sat.send("anvil_setBalance", [satPoolAddress, "0x56BC75E2D63100000"]);
+  await send(
+    new ethers.Contract(satStable.target, ERC20_ABI, await sat.getSigner(satPoolAddress)),
+    "mint",
+    [holder.address, ethers.parseEther("1000")]
+  );
+  await sat.send("anvil_stopImpersonatingAccount", [satPoolAddress]);
+  note("funded the holder with 1,000 SC to cover accrued interest");
+
+  // The vault pulls the repayment, so it needs an allowance.
+  await send(satStable, "approve", [satVault, ethers.MaxUint256]);
+
+  /**
+   * Repaying the principal alone does not close the loan.
+   *
+   * The controller applies payment to accrued interest first, so sending
+   * exactly `amountBorrowedInUSDT` clears the interest and leaves that much
+   * principal behind. The full payoff is principal scaled by
+   * currentIndex / userBorrowIndex — and that number grows every second, while
+   * overpaying reverts with LoanAmountExceeded. So recompute and repay until
+   * it closes, which converges immediately once the remainder is dust.
+   */
+  let loanAfter = loanBefore;
+  for (let attempt = 0; attempt < 3 && !loanAfter.isClosed; attempt += 1) {
+    const index = await satPool.getBorrowerIndex.staticCall(RWA_TOKEN_ID);
+    const payoff = (loanAfter.amountBorrowedInUSDT * index) / loanAfter.userBorrowIndex;
+    const outstandingBefore = loanAfter.amountBorrowedInUSDT;
+
+    await send(satPool, "repayLoan", [CHAINS.arb.chainId, RWA_TOKEN_ID, payoff, loanId], {
+      value: CCIP_FEE,
+    });
+
+    // Critical: the repayment is applied on the hub and mirrored back, so the
+    // satellite still reports the old figure for a moment. Reading it straight
+    // away and looping would repay a second time against state that had already
+    // been settled — which drains the borrower rather than closing the loan.
+    loanAfter = await waitUntil(
+      "the repayment to be reflected",
+      () => satPool.getLoanDetails(CHAINS.arb.chainId, holder.address, RWA_TOKEN_ID, loanId),
+      (loan) => loan.isClosed || loan.amountBorrowedInUSDT < outstandingBefore
+    );
+    process.stdout.write("\r\x1b[K");
+
+    if (!loanAfter.isClosed) {
+      note(`interest accrued mid-payment; ${tk(loanAfter.amountBorrowedInUSDT)} SC left, settling it`);
+    }
+  }
+  note(`outstanding now ${tk(loanAfter.amountBorrowedInUSDT)} SC, closed: ${loanAfter.isClosed}`);
+
+  if (!loanAfter.isClosed) {
+    bad("loan did not close on full repayment");
+    process.exitCode = 1;
+  } else {
+    ok("debt discharged on the chain it was drawn from");
+  }
+
+  // ─── 7 ────────────────────────────────────────────────────────────────────
+  step("Withdraw the collateral — the charge lifts");
+
+  await waitUntil(
+    "the repayment to settle on the hub",
+    () => pool.getLoanDetails(CHAINS.arb.chainId, holder.address, RWA_TOKEN_ID, loanId),
+    (loan) => loan.isClosed
+  );
+  process.stdout.write("\r\x1b[K");
+  ok("the hub agrees the debt is discharged");
+
+  const chargeBeforeRelease = await token.encumberedOf(holder.address);
+  await send(pool, "withdrawCollateral", [RWA_TOKEN_ID, pledge], { value: CCIP_FEE });
+
+  const chargeAfter = await token.encumberedOf(holder.address);
+  const freeAfter = await token.freeBalanceOf(holder.address);
+  note(`encumbered ${tk(chargeBeforeRelease)} → ${tk(chargeAfter)}, free ${tk(freeAfter)}`);
+
+  // The whole point: what was pledged is transferable again, and nothing ever
+  // had to be sent anywhere and sent back.
+  const recipient = TRUSTEE.address;
+  const heldBefore = await token.balanceOf(recipient);
+  await send(token, "transfer", [recipient, pledge]);
+  const moved = (await token.balanceOf(recipient)) - heldBefore;
+
+  if (moved !== pledge) {
+    bad(`expected to move ${tk(pledge)} after release, moved ${tk(moved)}`);
+    process.exitCode = 1;
+  } else {
+    ok(`the ${tk(pledge)} that could not move a moment ago now moves freely`);
+  }
+
+  // Put it back so the default path below has something to work with.
+  await send(new ethers.Contract(tokenAddress, TOKEN_ABI, trustee), "transfer", [holder.address, pledge]);
+
+  // ─── 8 ────────────────────────────────────────────────────────────────────
+  step("The other ending: default and foreclosure");
+
+  // A fresh charge. The earlier one closed, and the register advanced past it.
+  await send(pool, "depositRwaCollateral", [RWA_TOKEN_ID, pledge], { value: CCIP_FEE });
+  const lienId2 = await liens.computeLienId(holder.address, tokenAddress, PLEDGE_REF);
+  note(`a second charge of ${tk(await token.encumberedOf(holder.address))} recorded after the first was discharged`);
   const navAtDefault = await issuer.nav();
   note(`NAV has accreted to $${ethers.formatUnits(navAtDefault, 8)}`);
 
   const standingCharge = await token.encumberedOf(holder.address);
   const expected = await issuer.quoteRedemption(standingCharge);
-  await send(liens, "foreclose", [lienId]);
+  await send(liens, "foreclose", [lienId2]);
 
   const holderAfter = await token.balanceOf(holder.address);
   note(`holder balance now ${tk(holderAfter)} — the 800 moved, once, under the charge`);
   note(`trustee now holds ${tk(await token.balanceOf(trustee.address))} ${symbol}`);
-  ok(`lien active: ${await liens.isActive(lienId)}`);
+  ok(`charge discharged by enforcement (active: ${await liens.isActive(lienId2)})`);
 
   const trusteeIssuer = new ethers.Contract(issuerAddress, ISSUER_ABI, trustee);
   const trusteeStable = new ethers.Contract(stable.target, ERC20_ABI, trustee);

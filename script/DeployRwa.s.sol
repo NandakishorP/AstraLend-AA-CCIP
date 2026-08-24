@@ -8,6 +8,7 @@ import {LienRegistry} from "../src/rwa/LienRegistry.sol";
 import {EligibilityRegistry} from "../src/rwa/EligibilityRegistry.sol";
 import {TBillNavOracle} from "../src/rwa/TBillNavOracle.sol";
 import {LendingPoolContract} from "../src/LendingPoolContract.sol";
+import {IGlobalStateManager} from "../src/interfaces/IGlobalStateManager.sol";
 
 /**
  * Deploys the real-world asset module onto an existing hub deployment.
@@ -23,6 +24,7 @@ import {LendingPoolContract} from "../src/LendingPoolContract.sol";
  *   LENDING_POOL      the hub pool proxy, already deployed and initialised
  *   STABLE_COIN       used for the issuer's redemption reserve
  *   DEMO_HOLDER       receives the bill and is marked eligible
+ *   GSM               global state manager, for seeding the borrower index
  *   SECURITY_TRUSTEE  may enforce a charge; kept distinct from the holder
  *                     because they are different legal parties, and distinct
  *                     from the deployer because tooling/relayer.mjs signs with
@@ -114,6 +116,11 @@ contract DeployRwa is Script {
             RWA_LIQUIDATION_THRESHOLD
         );
         LendingPoolContract(payable(pool)).setLienRegistry(address(liens));
+
+        // Interest accrual is index-based and repayment divides by the index the
+        // loan was stamped with. Without this the asset can be borrowed against
+        // and never repaid — a divide-by-zero panic on the way out.
+        IGlobalStateManager(vm.envAddress("GSM")).setInitialBorrowerIndex(RWA_TOKEN_ID);
 
         // ─── Seed the demo ───────────────────────────────────────────────────
         issuer.mint(demoHolder, HOLDER_ALLOCATION);

@@ -49,6 +49,21 @@ contract StateAggregator is Ownable {
     ) external onlyOwner {
         s_isAuthorizedToRead[caller] = status;
     }
+    /**
+     * @notice Seeds the mirrored borrower index for a newly registered asset.
+     *
+     * @dev The satellite stamps `loan.userBorrowIndex` from this mirror at
+     *      borrow time, and repayment divides by it. Left at zero the loan is
+     *      created with a zero index and can never be repaid.
+     *
+     *      Separate from updateBorrowerIndex because that is reserved for CCIP
+     *      handlers carrying real accrual from the hub; this is a one-off
+     *      registration step performed by the owner.
+     */
+    function setInitialBorrowerIndex(uint64 tokenId) external onlyOwner {
+        s_borrowerIndex[tokenId] = 1e18;
+    }
+
     function updateBorrowerIndex(
         uint64 tokenId,
         uint256 value
