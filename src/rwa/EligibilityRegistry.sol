@@ -73,6 +73,14 @@ contract EligibilityRegistry is Ownable, IEligibilityRegistry {
         emit EligibilityRevoked(subject);
     }
 
+    /// @notice ERC-3643 spelling of the same question.
+    /// @dev A real deployment would not use this at all — holder eligibility is
+    ///      the token issuer's identity registry, not the lender's. It exists
+    ///      so the mock security has something to consult.
+    function isVerified(address subject) external view returns (bool) {
+        return this.isEligible(subject);
+    }
+
     /// @dev An expired attestation is not eligible, without anyone having to
     ///      run a revocation transaction to make that true.
     function isEligible(address subject) external view returns (bool) {

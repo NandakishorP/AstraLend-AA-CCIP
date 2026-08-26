@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ILienRegistry} from "./interfaces/ILienRegistry.sol";
-import {IRWAToken} from "./interfaces/IRWAToken.sol";
+import {IERC3643, IAgentRole} from "./interfaces/IERC3643.sol";
 
 /**
  * @title LienRegistry
@@ -38,6 +38,7 @@ contract LienRegistry is Ownable, ILienRegistry {
     error Lien__ZeroAddress();
     error Lien__DuplicateLien(bytes32 lienId);
     error Lien__DecreaseExceedsLien(uint256 outstanding, uint256 requested);
+    error Lien__NotAnAgentOnToken(address token, address registry);
 
     mapping(bytes32 lienId => Lien) private s_liens;
     mapping(address borrower => mapping(address token => uint256 amount)) private s_totalEncumbered;
@@ -120,7 +121,7 @@ contract LienRegistry is Ownable, ILienRegistry {
 
         // The token enforces the cap. If the borrower has already pledged this
         // holding elsewhere, this reverts and no lien is recorded.
-        IRWAToken(token).encumber(borrower, amount);
+        IERC3643(token).freezePartialTokens(borrower, amount);
 
         emit LienCreated(lienId, borrower, token, amount, loanRef, uint64(block.timestamp));
     }
@@ -140,7 +141,7 @@ contract LienRegistry is Ownable, ILienRegistry {
         lien.amount += amount;
         s_totalEncumbered[lien.borrower][lien.token] += amount;
 
-        IRWAToken(lien.token).encumber(lien.borrower, amount);
+        IERC3643(lien.token).freezePartialTokens(lien.borrower, amount);
 
         emit LienIncreased(lienId, lien.borrower, amount, lien.amount);
     }
@@ -159,7 +160,7 @@ contract LienRegistry is Ownable, ILienRegistry {
         lien.amount -= amount;
         s_totalEncumbered[lien.borrower][lien.token] -= amount;
 
-        IRWAToken(lien.token).release(lien.borrower, amount);
+        IERC3643(lien.token).unfreezePartialTokens(lien.borrower, amount);
 
         emit LienDecreased(lienId, lien.borrower, amount, lien.amount);
     }
@@ -172,7 +173,7 @@ contract LienRegistry is Ownable, ILienRegistry {
         s_totalEncumbered[lien.borrower][lien.token] -= lien.amount;
         s_pledgeSequence[lien.borrower][lien.token] += 1;
 
-        IRWAToken(lien.token).release(lien.borrower, lien.amount);
+        IERC3643(lien.token).unfreezePartialTokens(lien.borrower, lien.amount);
 
         emit LienReleased(lienId, lien.borrower, lien.amount, uint64(block.timestamp));
     }
@@ -192,7 +193,20 @@ contract LienRegistry is Ownable, ILienRegistry {
         s_totalEncumbered[lien.borrower][lien.token] -= lien.amount;
         s_pledgeSequence[lien.borrower][lien.token] += 1;
 
-        IRWAToken(lien.token).forcedTransfer(lien.borrower, msg.sender, lien.amount, lienId);
+        // Discharge the charge first, then move the tokens.
+        //
+        // ERC-3643's forcedTransfer will unfreeze on its own, but only the
+        // *shortfall* — it spends the free balance first and dips into frozen
+        // for the remainder. Foreclosing a 800 charge against a holder with 200
+        // free therefore takes their 200 free tokens plus 600 pledged ones, and
+        // leaves 200 frozen against a lien that no longer exists. An orphaned
+        // freeze, clearable only by an agent.
+        //
+        // Releasing the exact charge first makes the whole amount free, so the
+        // forced transfer takes precisely what was pledged and the holder's
+        // frozen total lands at zero.
+        IERC3643(lien.token).unfreezePartialTokens(lien.borrower, lien.amount);
+        IERC3643(lien.token).forcedTransfer(lien.borrower, msg.sender, lien.amount);
 
         emit LienForeclosed(lienId, lien.borrower, msg.sender, lien.amount);
     }
@@ -242,6 +256,18 @@ contract LienRegistry is Ownable, ILienRegistry {
         if (pool == address(0)) revert Lien__ZeroAddress();
         s_pool = pool;
         emit PoolSet(pool);
+    }
+
+    /**
+     * @notice Reverts unless this registry has been appointed an agent on `token`.
+     * @dev Every call the registry makes into the token is `onlyAgent`. Without
+     *      the appointment nothing fails until a borrower tries to pledge, so a
+     *      deployment should assert it up front.
+     */
+    function assertIsAgent(address token) external view {
+        if (!IAgentRole(token).isAgent(address(this))) {
+            revert Lien__NotAnAgentOnToken(token, address(this));
+        }
     }
 
     function setSecurityTrustee(address trustee) external onlyOwner {
