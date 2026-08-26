@@ -198,3 +198,19 @@ export function useRwaLien(enabled = true) {
     retry: false,
   });
 }
+
+/**
+ * Agent rights on the security.
+ *
+ * Worth its own hook because it is the one precondition that makes the whole
+ * RWA path work, and a deployment missing it looks fine until someone pledges.
+ */
+export function useRwaAgency(enabled = true) {
+  return useQuery({
+    queryKey: ["rwa-agency"],
+    queryFn: () => api.rwaAgency(),
+    enabled,
+    retry: false,
+    staleTime: 60_000,
+  });
+}

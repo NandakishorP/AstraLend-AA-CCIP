@@ -12,6 +12,19 @@
   },
   {
     "type": "function",
+    "name": "assertIsAgent",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "computeLienId",
     "inputs": [
       {
@@ -601,6 +614,22 @@
         "name": "lienId",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Lien__NotAnAgentOnToken",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "registry",
+        "type": "address",
+        "internalType": "address"
       }
     ]
   },

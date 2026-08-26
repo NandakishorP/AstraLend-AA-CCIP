@@ -412,11 +412,12 @@ export interface IndexerChainStatus {
 // ─── Real-world asset collateral ──────────────────────────────────────────────
 
 /**
- * A holder's position in an encumbered instrument.
+ * A holder's position in a third-party ERC-3643 security.
  *
  * `balance` and `encumbered` are reported together on purpose. Pledging does not
  * move the tokens, so the balance alone says nothing about what is committed —
- * only the gap between balance and free does.
+ * only the gap between balance and free does. `encumbered` is the security's own
+ * `getFrozenTokens`, not a number the protocol keeps.
  */
 export interface RwaHolding {
   userAddress: string;
@@ -467,4 +468,18 @@ export interface LienView {
 
 export interface RwaStatus {
   available: boolean;
+}
+
+/**
+ * Whether the protocol can operate the security's freeze at all.
+ *
+ * The collateral is somebody else's issuance. Freezing a holder's balance
+ * requires agent rights granted by the issuer — the on-chain half of the
+ * tri-party agreement. Without it every pledge reverts.
+ */
+export interface RwaAgency {
+  securityAddress: string;
+  lienRegistry: string;
+  registryIsAgent: boolean;
+  issuer: string;
 }

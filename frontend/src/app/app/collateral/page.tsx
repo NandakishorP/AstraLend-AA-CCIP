@@ -2,8 +2,8 @@
 
 import { PageHeader } from "@/components/app/app-shell";
 import { ConnectGate } from "@/components/app/connect-gate";
-import { useRwaHolding, useRwaLien, useRwaNav, useRwaStatus } from "@/lib/hooks";
-import { formatUsdNumber } from "@/lib/format";
+import { useRwaAgency, useRwaHolding, useRwaLien, useRwaNav, useRwaStatus } from "@/lib/hooks";
+import { formatUsdNumber, shortAddress } from "@/lib/format";
 import {
   Badge,
   Card,
@@ -20,10 +20,15 @@ import {
  * Encumbered real-world collateral.
  *
  * The page exists to make one thing visible: the tokens never move. A borrower
- * posting collateral here sees their balance stay exactly where it was, with a
- * charge recorded against part of it. That is the difference between this and
- * every other lending venue, and it is only legible if balance and encumbrance
- * are shown side by side.
+ * posting collateral here sees their balance stay exactly where it was, with
+ * part of it frozen in place. That is the difference between this and every
+ * other lending venue, and it is only legible if balance and frozen amount are
+ * shown side by side.
+ *
+ * The security is a third-party ERC-3643 issuance — we do not mint it and never
+ * hold it — so the agency panel is not decoration. Without agent rights from the
+ * issuer nothing here works, and a deployment missing them looks perfectly fine
+ * until somebody tries to pledge.
  */
 export default function CollateralPage() {
   const status = useRwaStatus();
@@ -32,12 +37,13 @@ export default function CollateralPage() {
   const nav = useRwaNav(available);
   const holding = useRwaHolding(available);
   const lien = useRwaLien(available);
+  const agency = useRwaAgency(available);
 
   return (
     <>
       <PageHeader
         title="Real-world collateral"
-        description="Pledge a tokenised Treasury bill without transferring it. The instrument stays in your wallet; only a charge is recorded."
+        description="Pledge a tokenised Treasury bill without transferring it. The security stays in your wallet, frozen in place by its own issuer's contract."
       />
 
       {status.isLoading ? (
@@ -52,6 +58,43 @@ export default function CollateralPage() {
       ) : (
         <ConnectGate title="Connect to see your holding">
           <div className="space-y-4">
+            {/* ─── Agent rights ───────────────────────────────────────────── */}
+            {agency.data ? (
+              <Card>
+                <CardHeader
+                  title="Custody model"
+                  subtitle="A third-party security, operated under delegated authority"
+                  action={
+                    <Badge tone={agency.data.registryIsAgent ? "safe" : "danger"}>
+                      {agency.data.registryIsAgent ? "Agent rights granted" : "No agent rights"}
+                    </Badge>
+                  }
+                />
+                <dl className="divide-y divide-hairline">
+                  <Row label="Security">
+                    <span className="tabular text-xs text-ink-muted">
+                      {shortAddress(agency.data.securityAddress)}
+                    </span>
+                  </Row>
+                  <Row label="Issued by">
+                    <span className="tabular text-xs text-ink-muted">
+                      {shortAddress(agency.data.issuer)}
+                    </span>
+                  </Row>
+                  <Row label="Lien registry (our agent)">
+                    <span className="tabular text-xs text-ink-muted">
+                      {shortAddress(agency.data.lienRegistry)}
+                    </span>
+                  </Row>
+                </dl>
+                <p className="border-t border-hairline px-5 py-3 text-xs text-ink-faint">
+                  {agency.data.registryIsAgent
+                    ? "The issuer has authorised this protocol to freeze a holder's balance in place — the on-chain half of the tri-party agreement. The protocol never takes custody."
+                    : "Without agent rights from the issuer every pledge reverts. This deployment cannot take this security as collateral."}
+                </p>
+              </Card>
+            ) : null}
+
             {/* ─── The instrument ─────────────────────────────────────────── */}
             <Card>
               <CardHeader
@@ -137,7 +180,7 @@ export default function CollateralPage() {
                       hint={formatUsdNumber(Number(holding.data.balanceUsd))}
                     />
                     <Stat
-                      label="Encumbered"
+                      label="Frozen (pledged)"
                       value={holding.data.encumbered}
                       hint={formatUsdNumber(Number(holding.data.encumberedUsd))}
                       tone="warn"
@@ -154,6 +197,13 @@ export default function CollateralPage() {
                     encumbered={Number(holding.data.encumbered)}
                     total={Number(holding.data.balance)}
                   />
+
+                  <p className="text-xs text-ink-faint">
+                    The frozen portion is enforced by the security itself — an
+                    ERC-3643 transfer requires{" "}
+                    <span className="tabular">balance − frozen</span>, so neither you
+                    nor any other protocol can move it while it backs a loan.
+                  </p>
                 </div>
               ) : null}
             </Card>

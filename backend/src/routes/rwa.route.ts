@@ -1,5 +1,5 @@
 import { type FastifyInstance } from "fastify";
-import { getHolding, getLien, getNav, isConfigured } from "../services/rwa.service.js";
+import { getAgency, getHolding, getLien, getNav, isConfigured } from "../services/rwa.service.js";
 import { ValidationError } from "../errors.js";
 
 const ADDRESS_PATTERN = "^0x[a-fA-F0-9]{40}$";
@@ -35,6 +35,29 @@ export default async function rwaRoutes(fastify: FastifyInstance) {
       },
     },
     async (_req, reply) => reply.send({ success: true, data: { available: isConfigured() } })
+  );
+
+  /**
+   * GET /rwa/agency
+   *
+   * Whether the issuer has appointed our lien registry as an agent on the
+   * security. Nothing else in this module works without it — every pledge
+   * reverts with NotAgent — so it is worth being able to see directly rather
+   * than inferring it from a failed borrow.
+   */
+  fastify.get(
+    "/agency",
+    {
+      schema: {
+        tags: ["rwa"],
+        summary: "Whether the protocol holds agent rights on the security",
+        description:
+          "The collateral is a third-party ERC-3643 issuance. Freezing a holder's " +
+          "balance in place requires agent rights granted by the issuer — the " +
+          "on-chain half of the tri-party agreement.",
+      },
+    },
+    async (_req, reply) => reply.send({ success: true, data: await getAgency() })
   );
 
   /**

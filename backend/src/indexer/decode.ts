@@ -63,6 +63,10 @@ export const EVENT_KINDS: Record<string, { kind: ActivityKind; label: string }> 
   // recorded elsewhere — it is the register entry itself, which is what makes
   // the charge good against third parties.
   LienCreated: { kind: "lien-created", label: "Collateral encumbered" },
+  // Emitted by the security itself, not by us — the freeze is the issuer's
+  // contract acting on our instruction as an appointed agent.
+  TokensFrozen: { kind: "lien-created", label: "Security frozen in place" },
+  TokensUnfrozen: { kind: "lien-released", label: "Security unfrozen" },
   LienIncreased: { kind: "lien-created", label: "Encumbrance increased" },
   LienDecreased: { kind: "lien-released", label: "Encumbrance reduced" },
   LienReleased: { kind: "lien-released", label: "Collateral released" },

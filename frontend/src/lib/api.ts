@@ -23,6 +23,7 @@ import type {
   NavSnapshot,
   LienView,
   RwaStatus,
+  RwaAgency,
 } from "./types";
 
 export const API_BASE =
@@ -134,6 +135,8 @@ export const api = {
   rwaStatus: () => request<RwaStatus>("/rwa/status"),
 
   rwaNav: () => request<NavSnapshot>("/rwa/nav"),
+
+  rwaAgency: () => request<RwaAgency>("/rwa/agency"),
 
   rwaHolding: (address: string) => request<RwaHolding>(`/rwa/holding/${address}`),
 

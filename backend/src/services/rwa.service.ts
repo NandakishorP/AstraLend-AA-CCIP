@@ -2,7 +2,7 @@ import { ethers } from "ethers";
 import { getProvider } from "../blockchain/providers.js";
 import { env } from "../config/env.js";
 import { ConfigError } from "../errors.js";
-import RWATokenAbi from "../abis/RWAToken.json" with { type: "json" };
+import ERC3643Abi from "../abis/ERC3643.json" with { type: "json" };
 import LienRegistryAbi from "../abis/LienRegistry.json" with { type: "json" };
 import EligibilityAbi from "../abis/EligibilityRegistry.json" with { type: "json" };
 import NavOracleAbi from "../abis/TBillNavOracle.json" with { type: "json" };
@@ -11,14 +11,16 @@ import type { ChainKey } from "../config/env.js";
 /**
  * Reads for encumbered real-world collateral.
  *
- * The distinction that shapes every function here: an encumbrance leaves no
- * balance anywhere to read. With crypto collateral you can ask the vault what
- * it holds. With a pledged instrument the borrower still holds the tokens, and
- * the only evidence of the charge is the register. So "how much collateral does
- * this user have" becomes two numbers that must be reported side by side —
- * what they hold, and how much of it is spoken for.
+ * The collateral is a third-party ERC-3643 security. We do not issue it and
+ * never hold it, so there is no vault balance to read — the borrower still owns
+ * the tokens throughout. "How much collateral does this user have" is therefore
+ * two numbers that only mean something together: what they hold, and how much
+ * of it the issuer's contract has frozen on our instruction.
  *
- * Hub-only throughout. The instrument exists on one chain; satellites see
+ * Everything here speaks the standard's vocabulary (`getFrozenTokens`) rather
+ * than any of ours, because these calls would go to a real issuance unchanged.
+ *
+ * Hub-only throughout. The security exists on one chain; satellites see
  * mirrored state, never the asset.
  */
 
@@ -33,10 +35,10 @@ function requireAddress(value: string | undefined, name: string): string {
   return value;
 }
 
-function token() {
+function security() {
   return new ethers.Contract(
     requireAddress(env.RWA_TOKEN_ADDRESS, "RWA_TOKEN_ADDRESS"),
-    RWATokenAbi,
+    ERC3643Abi,
     getProvider(HUB)
   );
 }
@@ -72,9 +74,9 @@ export interface RwaHolding {
   decimals: number;
   /** Everything the holder owns. Unchanged by pledging — that is the point. */
   balance: string;
-  /** The charge standing against it. */
+  /** Frozen by the security on our instruction. ERC-3643 getFrozenTokens. */
   encumbered: string;
-  /** What remains transferable. */
+  /** balance − frozen. What a transfer is still allowed to move. */
   free: string;
   balanceUsd: string;
   encumberedUsd: string;
@@ -82,6 +84,34 @@ export interface RwaHolding {
   navPerToken: string;
   eligible: boolean;
   eligibilityExpiry: number | null;
+}
+
+/**
+ * Whether the protocol can actually operate the security's freeze.
+ *
+ * Without the issuer's agent appointment every pledge reverts, so this is
+ * surfaced rather than left to be discovered at the first borrow.
+ */
+export interface RwaAgency {
+  securityAddress: string;
+  lienRegistry: string;
+  registryIsAgent: boolean;
+  issuer: string;
+}
+
+export async function getAgency(): Promise<RwaAgency> {
+  const sec = security();
+  const registry = requireAddress(env.RWA_LIEN_REGISTRY_ADDRESS, "RWA_LIEN_REGISTRY_ADDRESS");
+  const [registryIsAgent, issuer] = await Promise.all([
+    sec.isAgent(registry) as Promise<boolean>,
+    sec.owner() as Promise<string>,
+  ]);
+  return {
+    securityAddress: requireAddress(env.RWA_TOKEN_ADDRESS, "RWA_TOKEN_ADDRESS"),
+    lienRegistry: registry,
+    registryIsAgent,
+    issuer,
+  };
 }
 
 export interface NavSnapshot {
@@ -148,12 +178,12 @@ export async function getNav(): Promise<NavSnapshot> {
 }
 
 export async function getHolding(userAddress: string): Promise<RwaHolding> {
-  const rwa = token();
+  const rwa = security();
   const eligibility = eligibilityRegistry();
 
   const [balance, encumbered, symbol, decimals, nav, eligible, status] = await Promise.all([
     rwa.balanceOf(userAddress) as Promise<bigint>,
-    rwa.encumberedOf(userAddress) as Promise<bigint>,
+    rwa.getFrozenTokens(userAddress) as Promise<bigint>,
     rwa.symbol() as Promise<string>,
     rwa.decimals() as Promise<bigint>,
     getNav(),
@@ -238,7 +268,7 @@ export async function getLien(userAddress: string): Promise<LienView | null> {
     const lien = await registry.getLien(lienId);
     if (lien.perfectedAt === 0n) continue;
 
-    const decimals = Number(await token().decimals());
+    const decimals = Number(await security().decimals());
     return {
       lienId,
       sequence: seq,
