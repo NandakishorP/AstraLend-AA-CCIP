@@ -9,9 +9,10 @@ import {IStateAggregator} from "../src/interfaces/IStateAggregator.sol";
 /**
  * Registers the hub's instrument on a satellite so it can be borrowed against.
  *
- * No token, no issuer, no lien registry here — none of them belong on this
- * chain. The instrument stays on the hub and the satellite only ever learns
- * that a charge exists, through the mirrored collateral message.
+ * No security, no registry here — neither belongs on this chain. The
+ * instrument is a third-party issuance living on the hub, and the satellite
+ * only ever learns that a charge exists, through the mirrored collateral
+ * message. There is no wrapped copy to reconcile because none is minted.
  *
  * What the satellite does need is a way to *value* what it has been told about.
  * For a Treasury bill that costs nothing: the value is a deterministic function
@@ -30,13 +31,14 @@ import {IStateAggregator} from "../src/interfaces/IStateAggregator.sol";
  * not hold for an asset whose value has to be observed. An attested NAV would
  * have to be messaged across like any other state.
  *
- * `tokenAddress` is registered as the hub's address. Nothing lives there on this
- * chain, and that is correct: it identifies which instrument secures the loan,
- * and the canonical identity of the instrument is its hub address.
+ * `tokenAddress` is registered as the security's hub address. Nothing lives
+ * there on this chain, and that is correct: it identifies which instrument
+ * secures the loan, and the instrument's canonical identity is where the
+ * issuer deployed it.
  *
  * Required environment:
  *   LENDING_POOL   the satellite pool proxy
- *   RWA_TOKEN      the hub's token address, recorded as the instrument's identity
+ *   RWA_TOKEN      the security's hub address, recorded as its identity
  *   ISSUE_PRICE / FACE_VALUE / ISSUE_DATE / MATURITY_DATE
  *                  copied verbatim from the hub oracle so the curves match
  */

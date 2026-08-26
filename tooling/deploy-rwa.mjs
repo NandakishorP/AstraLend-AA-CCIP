@@ -8,11 +8,12 @@
  *
  * Two chains, deliberately asymmetric:
  *
- *   hub        the instrument itself — token, issuer, lien registry,
- *              eligibility registry, valuation
+ *   hub        the security (a third-party ERC-3643 issuance, mocked here),
+ *              its identity registry, our lien registry, valuation, and a
+ *              redemption desk standing in for realising collateral
  *   satellite  a valuation oracle and an asset registration, nothing more
  *
- * The satellite gets no token and no registry because neither belongs there.
+ * The satellite gets no security and no registry because neither belongs there.
  * It only ever learns that a charge exists, through the mirrored collateral
  * message. What it does need is a way to value what it has been told about, and
  * for a Treasury bill that is free: the value is arithmetic over four constants,
@@ -69,7 +70,7 @@ async function main() {
     SECURITY_TRUSTEE: TRUSTEE,
     GSM: deployment.chains.eth.gsm,
   });
-  log(`  token ${hub.rwaToken}  registry ${hub.rwaLienRegistry}`);
+  log(`  security ${hub.rwaSecurity}  registry ${hub.rwaLienRegistry} (agent on the security)`);
 
   // Read the curve back off the hub rather than restating it, so the satellite
   // cannot be given a different instrument by accident.
@@ -87,7 +88,7 @@ async function main() {
   log(`satellite → ${CHAINS.arb.rpcUrl}`);
   const satellite = forgeScript("script/DeployRwaSatellite.s.sol", CHAINS.arb.rpcUrl, {
     LENDING_POOL: deployment.chains.arb.lendingPool,
-    RWA_TOKEN: hub.rwaToken,
+    RWA_TOKEN: hub.rwaSecurity,
     STATE_AGGREGATOR: deployment.chains.arb.stateAggregator,
     ...curve,
   });
@@ -102,11 +103,11 @@ async function main() {
       "",
       "# ─── Real-world asset collateral (hub only) ───────────────────────────────────",
       "# Written by tooling/deploy-rwa.mjs.",
-      `RWA_TOKEN_ADDRESS=${hub.rwaToken}`,
-      `RWA_ISSUER_ADDRESS=${hub.rwaIssuer}`,
+      `RWA_TOKEN_ADDRESS=${hub.rwaSecurity}`,
       `RWA_LIEN_REGISTRY_ADDRESS=${hub.rwaLienRegistry}`,
-      `RWA_ELIGIBILITY_ADDRESS=${hub.rwaEligibility}`,
+      `RWA_ELIGIBILITY_ADDRESS=${hub.rwaIdentityRegistry}`,
       `RWA_NAV_ORACLE_ADDRESS=${hub.rwaNavOracle}`,
+      `RWA_REDEMPTION_DESK_ADDRESS=${hub.rwaRedemptionDesk}`,
       "",
     ].join("\n");
     fs.writeFileSync(envPath, env);
@@ -115,11 +116,11 @@ async function main() {
 
   const addrFile = path.join(REPO_ROOT, "tooling", "rwa.env");
   fs.writeFileSync(addrFile, [
-    `export RWA_TOKEN=${hub.rwaToken}`,
-    `export RWA_ISSUER=${hub.rwaIssuer}`,
+    `export RWA_SECURITY=${hub.rwaSecurity}`,
     `export RWA_LIENS=${hub.rwaLienRegistry}`,
-    `export RWA_ELIG=${hub.rwaEligibility}`,
+    `export RWA_IDENTITY=${hub.rwaIdentityRegistry}`,
     `export RWA_NAV=${hub.rwaNavOracle}`,
+    `export RWA_DESK=${hub.rwaRedemptionDesk}`,
     "",
   ].join("\n"));
 
