@@ -24,3 +24,6 @@ docs/
 
 # Scenario script output — local run state, regenerated on demand.
 /broadcast/Scenarios.s.sol/
+
+# RWA satellite registration — local run state, regenerated on demand.
+/broadcast/DeployRwaSatellite.s.sol/
