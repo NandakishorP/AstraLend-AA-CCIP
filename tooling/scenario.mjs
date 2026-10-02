@@ -56,7 +56,9 @@ function connect(chainKey) {
   const provider = new ethers.JsonRpcProvider(chain.rpcUrl, chain.chainId, {
     staticNetwork: ethers.Network.from(chain.chainId),
   });
-  const wallet = new ethers.Wallet(DEPLOYER.privateKey, provider);
+  // DEMO_KEY lets the scenario seed a position for a different wallet, e.g. when
+  // MetaMask's cached nonce for the default account has gone stale.
+  const wallet = new ethers.Wallet(process.env.DEMO_KEY ?? DEPLOYER.privateKey, provider);
   const addrs = deployment.chains[chainKey];
 
   // Nonces are tracked by hand: several transactions are fired per step and the
