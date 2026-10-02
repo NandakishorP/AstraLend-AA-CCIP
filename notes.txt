@@ -1,0 +1,716 @@
+\documentclass[aspectratio=169, 11pt]{beamer}
+
+% --- Packages & Setup ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{tikz} % Required for the corner box
+\usetikzlibrary{calc, positioning, arrows.meta, fit, backgrounds}
+
+\graphicspath{{../}{./}}
+
+% Try loading Open Sans; fallback if missing
+\IfFileExists{opensans.sty}{\usepackage[default,scale=0.95]{opensans}}{}
+
+% --- Branding Colors ---
+\definecolor{amritaMaroon}{HTML}{A4123F}
+\definecolor{slate}{HTML}{2F3A45}
+\definecolor{softGrey}{HTML}{EDEFF2}
+\definecolor{okGreen}{HTML}{2C6A4B}
+\definecolor{wipAmber}{HTML}{8C6224}
+\definecolor{dangerRed}{HTML}{9E2F2F}
+
+% --- Theme Setup ---
+\usetheme{Madrid}
+\usecolortheme[named=amritaMaroon]{structure}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+\setbeamertemplate{itemize items}[circle]
+
+% --- Helper macros ---
+\newcommand{\done}{\textcolor{okGreen}{\textbf{Done}}}
+\newcommand{\integrated}{\textcolor{okGreen}{\textbf{Integrated}}}
+\newcommand{\wip}{\textcolor{wipAmber}{\textbf{In Progress}}}
+\newcommand{\planned}{\textcolor{slate}{\textbf{Planned}}}
+\newcommand{\code}[1]{{\small\texttt{#1}}}
+\newcommand{\keypoint}[1]{%
+  \begin{center}\colorbox{softGrey}{\parbox{0.93\linewidth}{\centering \small #1}}\end{center}}
+
+\begin{document}
+
+% ============================================================
+% TITLE
+% ============================================================
+\begin{frame}
+    \begin{tikzpicture}[remember picture,overlay]
+        \node[fill=amritaMaroon, text=white, font=\bfseries\footnotesize, anchor=north east, rounded corners=2pt, inner sep=5pt]
+        at ($(current page.north east) + (-0.2cm,-0.2cm)$)
+        {Type 2: Application Project};
+    \end{tikzpicture}
+
+    \centering
+    \includegraphics[width=2.8cm]{logo.png}
+    \vspace{0.1cm}
+
+    {\large \textbf{\textcolor{amritaMaroon}{AstraLend: A Cross-Chain Decentralised Lending Protocol\\ Using Message-Based State Synchronisation}}} \\
+    \vspace{0.05cm}
+    {\footnotesize \textbf{23CSE498 -- Project Phase 2 (Panel Review 1)} \quad | \quad \textbf{Team Number: [XX]}} \\
+    \vspace{0.15cm}
+
+    \begin{table}
+        \centering
+        \footnotesize
+        \renewcommand{\arraystretch}{1.05}
+        \begin{tabular}{|c|c|l|}
+            \hline
+            \textbf{S.No} & \textbf{Register Number} & \textbf{Student Name} \\
+            \hline
+            1 & CB.EN.U4CSE23728 & K Manikanta Sai Vignan  \\
+            \hline
+            2 & CB.EN.U4CSE23733 & Nandakishor P  \\
+            \hline
+            3 & CB.EN.U4CSE23736 & Tarun Pasumarthy \\
+            \hline
+            4 & CB.EN.U4CSE23760 &  G T Hemanth Kumar \\
+            \hline
+        \end{tabular}
+    \end{table}
+    \vspace{0.1cm}
+
+    {\footnotesize Guide: \textbf{Guide Name}, Designation, Department of CSE} \\
+    \vspace{0.1cm}
+    {\scriptsize \today}
+\end{frame}
+
+% ============================================================
+% PART 1 -- FOUNDATIONS
+% ============================================================
+\section{Background}
+
+\begin{frame}{Background: Blockchain Fundamentals}
+    \framesubtitle{A distributed, append-only ledger with no controlling authority}
+    \begin{columns}
+        \column{0.5\textwidth}
+        \begin{itemize}
+            \item \textbf{Shared} --- thousands of nodes, identical copies
+            \item \textbf{Append-only} --- no edits, no deletions
+            \item \textbf{No owner} --- no head office, no reversals
+        \end{itemize}
+        \vspace{0.4cm}
+        \begin{itemize}
+            \item Bank ledger $\to$ trusted \emph{because of} the bank
+            \item Blockchain $\to$ trusted \emph{without} one
+        \end{itemize}
+
+        \column{0.5\textwidth}
+        \centering
+        \resizebox{\linewidth}{!}{%
+        \begin{tikzpicture}[
+            font=\sffamily\small,
+            blk/.style={draw=slate, fill=white, rounded corners=2pt, minimum width=1.7cm, minimum height=1.15cm, align=center, inner sep=3pt},
+            arr/.style={-{Stealth[length=2mm]}, draw=slate, thick}
+        ]
+            \node[blk] (b1) at (0,0) {\tiny Block 1\\ \tiny A pays B};
+            \node[blk, right=0.45cm of b1] (b2) {\tiny Block 2\\ \tiny C deposits};
+            \node[blk, right=0.45cm of b2] (b3) {\tiny Block 3\\ \tiny B borrows};
+            \node[right=0.35cm of b3, font=\large] (dots) {$\cdots$};
+            \draw[arr] (b1) -- (b2);
+            \draw[arr] (b2) -- (b3);
+            \draw[arr] (b3) -- (dots);
+            \node[draw=amritaMaroon, thick, fill=softGrey, rounded corners=2pt, below=0.9cm of b2, text width=5cm, align=center, inner sep=5pt]
+              {\small Rewriting history means\\ rewriting every copy at once};
+        \end{tikzpicture}}
+    \end{columns}
+    \vspace{0.25cm}
+    \keypoint{A shared database that no participant can unilaterally alter.}
+\end{frame}
+
+\begin{frame}{Background: Smart Contracts}
+    \framesubtitle{Self-executing programs deployed on a distributed ledger}
+    \begin{columns}
+        \column{0.52\textwidth}
+        \begin{itemize}
+            \item \textbf{Public} --- code readable by anyone
+            \item \textbf{Automatic} --- no employee approves it
+            \item \textbf{No exceptions} --- cannot be overridden
+        \end{itemize}
+        \vspace{0.35cm}
+        \textbf{Analogy: a vending machine}
+        \begin{itemize}
+            \item Prices posted openly
+            \item Dispenses on payment
+            \item No shopkeeper's judgement
+        \end{itemize}
+        \vspace{0.25cm}
+        In this protocol, \textbf{each banking role is a contract}
+
+        \column{0.48\textwidth}
+        \centering
+        \resizebox{0.95\linewidth}{!}{%
+        \begin{tikzpicture}[font=\sffamily\small,
+            role/.style={draw=slate, fill=white, rounded corners=2pt, text width=2.5cm, align=center, inner sep=5pt, minimum height=0.8cm},
+            sc/.style={draw=amritaMaroon, very thick, fill=softGrey, rounded corners=2pt, text width=2.6cm, align=center, inner sep=5pt, minimum height=0.8cm},
+            arr/.style={-{Stealth[length=2mm]}, draw=amritaMaroon, thick}
+        ]
+            \node[role] (r1) at (0,0) {\small Bank vault};
+            \node[role, below=0.35cm of r1] (r2) {\small Ledger};
+            \node[role, below=0.35cm of r2] (r3) {\small Loan officer};
+            \node[role, below=0.35cm of r3] (r4) {\small Recovery};
+
+            \node[sc, right=1.6cm of r1] (s1) {\small \code{Vault}};
+            \node[sc, right=1.6cm of r2] (s2) {\small \code{StateManager}};
+            \node[sc, right=1.6cm of r3] (s3) {\small \code{LoanController}};
+            \node[sc, right=1.6cm of r4] (s4) {\small \code{Liquidation}};
+
+            \draw[arr] (r1) -- (s1);
+            \draw[arr] (r2) -- (s2);
+            \draw[arr] (r3) -- (s3);
+            \draw[arr] (r4) -- (s4);
+
+            \node[above=0.2cm of r1, font=\small\bfseries] {Bank};
+            \node[above=0.2cm of s1, font=\small\bfseries] {This project};
+        \end{tikzpicture}}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{Background: Principles of Secured Lending}
+    \framesubtitle{Established banking practices replicated by the protocol}
+    \vspace{0.15cm}
+    \begin{columns}
+        \column{0.5\textwidth}
+        \textbf{1. Deposits fund loans}
+        \begin{itemize}
+            \item Savers pool money
+            \item Borrowers draw from it
+        \end{itemize}
+        \vspace{0.3cm}
+        \textbf{2. Collateral secures}
+        \begin{itemize}
+            \item Gold loan, loan against FD
+            \item Default $\to$ lender recovers
+        \end{itemize}
+        \vspace{0.3cm}
+        \textbf{3. Haircut on value}
+        \begin{itemize}
+            \item Pledge \$100 $\to$ get \$75
+            \item The gap = \textbf{loan-to-value}
+        \end{itemize}
+
+        \column{0.5\textwidth}
+        \textbf{4. Act before cushion is gone}
+        \begin{itemize}
+            \item Value falls $\to$ margin call
+            \item Then sale = \textbf{liquidation}
+        \end{itemize}
+        \vspace{0.3cm}
+        \textbf{Rates follow demand}
+        \begin{itemize}
+            \item Most deposits lent $\to$ rates up
+            \item Money idle $\to$ rates down
+            \item = \textbf{utilisation}
+        \end{itemize}
+        \vspace{0.35cm}
+        \keypoint{These four parameters govern the protocol design.}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{Mapping Banking Functions to Smart Contracts}
+    \centering
+    \vspace{0.1cm}
+    \small
+    \renewcommand{\arraystretch}{1.45}
+    \begin{tabular}{p{3.3cm} p{3.5cm} p{4.6cm}}
+        \toprule
+        \textbf{Function} & \textbf{In a bank} & \textbf{Here} \\
+        \midrule
+        Holds money & Vault & \code{Vault} contract \\
+        Records ownership & Core banking ledger & \code{GlobalStateManager} \\
+        Approves loans & Credit officer & \code{LoanController} \\
+        Sets rates & Treasury / ALCO & \code{InterestRateModel} \\
+        Recovers defaults & Collections dept & Automated liquidation \\
+        \bottomrule
+    \end{tabular}
+    \vspace{0.45cm}
+    \keypoint{Identical financial logic; rules published in advance, executed without discretion.}
+\end{frame}
+
+% ============================================================
+% PART 2 -- THE PROBLEM
+% ============================================================
+\section{Problem Statement}
+
+\begin{frame}{Problem Statement: Liquidity Fragmentation}
+    \begin{columns}
+        \column{0.5\textwidth}
+        \begin{itemize}
+            \item Hundreds of blockchains
+            \item Each keeps its own ledger
+            \item \textbf{None can read another's}
+        \end{itemize}
+        \vspace{0.35cm}
+        \textbf{Banking parallel}
+        \begin{itemize}
+            \item FD at Bank A
+            \item Loan wanted from Bank B
+            \item B cannot see or verify it
+        \end{itemize}
+        \vspace{0.35cm}
+        \begin{itemize}
+            \item Banks have credit bureaus, CERSAI
+            \item \textbf{Blockchains have no shared layer}
+        \end{itemize}
+
+        \column{0.5\textwidth}
+        \centering
+        \resizebox{0.92\linewidth}{!}{%
+        \begin{tikzpicture}[font=\sffamily\small,
+            chain/.style={draw=slate, fill=white, rounded corners=3pt, text width=3.1cm, align=center, inner sep=7pt, minimum height=1.8cm},
+            blocked/.style={-{Stealth[length=2.5mm]}, draw=dangerRed, very thick, dashed}
+        ]
+            \node[chain] (c1) at (0,0) {\textbf{Chain A}\\[3pt] \small collateral here};
+            \node[chain, right=2.8cm of c1] (c2) {\textbf{Chain B}\\[3pt] \small loan here};
+            \draw[blocked] (c1) -- (c2);
+            \node[fill=white, text=dangerRed, font=\bfseries\Large] at ($(c1)!0.5!(c2)$) {$\times$};
+            \node[below=0.6cm of $(c1)!0.5!(c2)$, font=\small, text=dangerRed, align=center] {no shared ledger};
+        \end{tikzpicture}}
+    \end{columns}
+    \vspace{0.2cm}
+    \keypoint{Capital remains idle on one network while demand is unmet on another.}
+\end{frame}
+
+\begin{frame}{Existing Approach: Asset Bridging}
+    \framesubtitle{Mechanism and its structural limitations}
+    \begin{columns}
+        \column{0.5\textwidth}
+        \textbf{How a bridge works}
+        \begin{enumerate}
+            \item Lock asset on Chain A
+            \item Mint substitute on Chain B
+            \item Use substitute as collateral
+        \end{enumerate}
+        \vspace{0.35cm}
+        \textbf{Why it is fragile}
+        \begin{itemize}
+            \item \textbf{Two objects, one value}
+            \item Correctness rests on the bridge's books
+            \item Mint without lock $\to$ counterfeit
+        \end{itemize}
+        \vspace{0.25cm}
+        \begin{itemize}
+            \item Largest loss category in the sector
+            \item \textbf{Billions of dollars}
+        \end{itemize}
+
+        \column{0.5\textwidth}
+        \centering
+        \resizebox{0.95\linewidth}{!}{%
+        \begin{tikzpicture}[font=\sffamily\small,
+            chain/.style={draw=slate, fill=white, rounded corners=3pt, text width=2.7cm, align=center, inner sep=6pt, minimum height=1.4cm},
+            bad/.style={draw=dangerRed, very thick, fill=white, rounded corners=3pt, text width=2.7cm, align=center, inner sep=6pt, minimum height=1.4cm},
+            arr/.style={-{Stealth[length=2.5mm]}, draw=dangerRed, very thick}
+        ]
+            \node[chain] (a) at (0,0) {\textbf{Chain A}\\ \small original locked};
+            \node[bad, right=2.4cm of a] (b) {\textbf{Chain B}\\ \small substitute minted};
+            \draw[arr] (a) -- node[above, font=\small] {bridge} (b);
+            \node[below=0.7cm of $(a)!0.5!(b)$, font=\small, text=dangerRed, align=center, text width=5.5cm]
+              {Two title deeds,\\ one property};
+        \end{tikzpicture}}
+    \end{columns}
+\end{frame}
+
+% ============================================================
+% PART 3 -- OUR SOLUTION
+% ============================================================
+\section{Proposed Solution}
+
+\begin{frame}{Proposed Approach}
+    \vspace{0.5cm}
+    \centering
+    \colorbox{amritaMaroon}{\parbox{0.92\linewidth}{\vspace{0.25cm}\centering
+      \color{white}\large \textbf{Do not move the money.\\[4pt] Move the record of it.}\vspace{0.25cm}}}
+    \vspace{0.6cm}
+
+    \begin{columns}
+        \column{0.48\textwidth}
+        \textbf{Banking parallel}
+        \begin{itemize}
+            \item Bank A does not courier the gold
+            \item It sends a \textbf{confirmation}
+            \item Bank B lends against that
+        \end{itemize}
+
+        \column{0.48\textwidth}
+        \textbf{What this buys}
+        \begin{itemize}
+            \item No substitute token anywhere
+            \item Nothing to reconcile
+            \item Bridge failures \textbf{structurally absent}
+        \end{itemize}
+        \vspace{0.2cm}
+        \textbf{Trade-off:} remote state is consistent shortly after the event, not instantly
+    \end{columns}
+\end{frame}
+
+% --- RUBRIC 1: ARCHITECTURE ---
+\section{Architecture \& Workflow Design}
+\begin{frame}{1. Architecture \& Workflow Design}
+    \framesubtitle{Rubric: Workflow, Module Interaction, UI Flow, DB Schema, APIs \& Deployment (5 Marks)}
+    \begin{columns}
+        \column{0.38\textwidth}
+        \small
+        \textbf{Workflow}
+        \begin{itemize}
+            \item \textbf{UI} --- Next.js; wallet signs, not server
+            \item \textbf{API} --- Fastify + TypeScript
+            \item \textbf{Data} --- SQLite indexer, both chains
+            \item \textbf{Chain} --- hub authoritative, satellite mirrors
+        \end{itemize}
+        \vspace{0.2cm}
+        \textbf{Deployment}
+        \begin{itemize}
+            \item Upgradeable transparent proxies
+            \item One-command two-chain harness
+        \end{itemize}
+
+        \column{0.62\textwidth}
+        \centering
+        \resizebox{\linewidth}{!}{%
+        \begin{tikzpicture}[
+            font=\sffamily\small,
+            box/.style={draw=slate, fill=white, rounded corners=2pt, minimum height=0.9cm, align=center, inner sep=5pt},
+            chain/.style={draw=amritaMaroon, very thick, fill=softGrey, rounded corners=2pt, minimum height=0.95cm, align=center, inner sep=5pt},
+            arr/.style={-{Stealth[length=2mm]}, draw=slate, thick},
+            ccip/.style={<->, >={Stealth[length=2mm]}, draw=amritaMaroon, very thick}
+        ]
+            \node[box, minimum width=2.7cm] (ui) at (0,0) {Web App\\ \scriptsize Next.js};
+            \node[box, minimum width=2.7cm, below=0.6cm of ui] (api) {REST API\\ \scriptsize Fastify};
+            \node[box, minimum width=2.7cm, below=0.6cm of api] (db) {Indexer + DB\\ \scriptsize SQLite};
+
+            \node[chain, minimum width=3.1cm, right=2.4cm of ui] (hub) {\textbf{HUB}\\ \scriptsize Global State Manager};
+            \node[chain, minimum width=3.1cm, right=2.4cm of db] (sat) {\textbf{SATELLITE}\\ \scriptsize State Mirror};
+
+            \draw[arr] (ui) -- (api);
+            \draw[arr] (api) -- (db);
+            \draw[arr] (ui.east) -- node[above, font=\scriptsize] {signed tx} (hub.west);
+            \draw[arr] (db.east) -- node[below, font=\scriptsize] {index} (sat.west);
+            \draw[arr] (api.east) -- node[above, font=\scriptsize, pos=0.35] {reads} (hub.south west);
+
+            \draw[ccip] (hub) -- node[right, font=\scriptsize, align=left] {\textbf{CCIP}\\ \scriptsize state only\\ \scriptsize no tokens} (sat);
+        \end{tikzpicture}}
+    \end{columns}
+\end{frame}
+
+% --- MODULE MAP ---
+\begin{frame}{System Module Decomposition}
+    \framesubtitle{26 contracts + 14 interfaces $\cdot$ Solidity 0.8.30 $\cdot$ $\approx$4{,}100 lines}
+    \centering
+    \small
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{p{2.4cm} p{5.6cm} p{4cm}}
+        \toprule
+        \textbf{Layer} & \textbf{Role} & \textbf{Contracts} \\
+        \midrule
+        Entry & Validate, delegate; behind proxy & \code{LendingPoolContract} \\
+        Service & Business logic; hub/satellite branch & 3 Controllers \\
+        Canonical state & Authoritative ledger (hub) & \code{GlobalStateManager} + 5 \\
+        Mirrored state & Read-only replica (satellite) & \code{StateAggregator} + 4 \\
+        Transport & Build, authenticate, dispatch messages & \code{CCIPReceiver} + 3 \\
+        Custody & Holds assets; moves only on instruction & \code{Vault} \\
+        \bottomrule
+    \end{tabular}
+    \vspace{0.4cm}
+    \keypoint{Custody is segregated from accounting: an accounting fault cannot move funds.}
+\end{frame}
+
+% --- CROSS-CHAIN FLOW ---
+\begin{frame}{Cross-Chain Borrowing Workflow}
+    \centering
+    \resizebox{0.93\linewidth}{!}{%
+    \begin{tikzpicture}[
+        font=\sffamily\small,
+        step/.style={draw=slate, fill=white, rounded corners=2pt, align=left, inner sep=6pt, minimum height=0.9cm},
+        hdr/.style={draw=none, fill=amritaMaroon, text=white, rounded corners=2pt, align=center, inner sep=5pt, minimum width=4.6cm},
+        arr/.style={-{Stealth[length=2mm]}, draw=slate, thick},
+        msg/.style={-{Stealth[length=2mm]}, draw=amritaMaroon, very thick, dashed}
+    ]
+        \node[hdr] (sh) at (0,0) {SATELLITE};
+        \node[hdr] (hh) at (8.5,0) {HUB};
+
+        \node[step, below=0.5cm of sh, text width=4.3cm] (s1) {\textbf{1.} Deposit 4 WETH\\ \scriptsize enters local Vault, \textbf{stays there}};
+        \node[step, below=1.6cm of hh, text width=4.3cm] (h1) {\textbf{2.} Hub records the position\\ \scriptsize 4 WETH held on satellite};
+        \node[step, below=1.5cm of h1, text width=4.3cm] (h2) {\textbf{3.} Call \code{borrowLoan}\\ \scriptsize \code{collateralChainId} = satellite};
+        \node[step, below=0.5cm of h2, text width=4.3cm] (h3) {\textbf{4.} Capacity = collateral $\times$ 75\%\\ \scriptsize stablecoin paid out on hub};
+        \node[step, below=1.5cm of s1, text width=4.3cm] (s2) {\textbf{5.} Mirror updated\\ \scriptsize satellite sees the debt};
+
+        \draw[msg] (s1.east) -- node[above, font=\scriptsize, sloped] {DEPOSIT\_COLLATERAL} (h1.west);
+        \draw[arr] (h1) -- (h2);
+        \draw[arr] (h2) -- (h3);
+        \draw[msg] (h3.west) -- node[below, font=\scriptsize, sloped] {LOAN\_TAKEN} (s2.east);
+    \end{tikzpicture}}
+    \vspace{0.3cm}
+
+    \keypoint{\code{collateralChainId} = chain securing the loan $\neq$ chain of execution.}
+\end{frame}
+
+% --- INTEREST & RISK ---
+\begin{frame}{Interest Accrual, Risk Parameters and Liquidation}
+    \framesubtitle{Protocol risk engine}
+    \begin{columns}
+        \column{0.5\textwidth}
+        \small
+        \textbf{Interest --- one number per asset}
+        \begin{itemize}
+            \item \code{index += index $\times$ rate $\times$ dt}
+            \item Loan stores index at origination
+            \item \code{debt = principal $\times$ now / then}
+            \item \textbf{Whole book accrues, O(1)}
+            \item Interest cleared before principal
+        \end{itemize}
+        \vspace{0.25cm}
+        \textbf{Rate curve}
+        \begin{itemize}
+            \item Base \textbf{5\%}, kink \textbf{70\%}, cap \textbf{100\%}
+            \item Steep above kink $\to$ defends liquidity
+        \end{itemize}
+
+        \column{0.5\textwidth}
+        \small
+        \textbf{Liquidation --- automated}
+        \begin{itemize}
+            \item Monitors collateral value + due date
+            \item Chainlink Automation triggers it
+        \end{itemize}
+        \vspace{0.25cm}
+        \textbf{Escalates like a bank}
+        \begin{itemize}
+            \item Penalty 1 $\to$ +30 days
+            \item Penalty 2 $\to$ +30 days
+            \item Then seizure
+            \item \textbf{Not liquidated on first breach}
+        \end{itemize}
+    \end{columns}
+    \vspace{0.3cm}
+    \keypoint{75\% LTV $\cdot$ 80\% liquidation threshold $\cdot$ 180-day term $\cdot$ live price feeds}
+\end{frame}
+
+% ============================================================
+% PART 4 -- EVIDENCE
+% ============================================================
+\section{Implementation \& Results}
+
+% --- RUBRIC 2a: COMPLETED ---
+\begin{frame}{2. Implementation Progress --- Completed Modules}
+    \framesubtitle{Rubric: Major Modules Implemented, Integrated \& Demonstrated (8 Marks)}
+    \vspace{-0.1cm}
+    \begin{table}
+        \centering
+        \small
+        \renewcommand{\arraystretch}{1.28}
+        \begin{tabular}{p{3.4cm} p{6.2cm} c}
+            \toprule
+            \textbf{Module} & \textbf{State} & \textbf{Status} \\
+            \midrule
+            Lending core & Supply, borrow, repay, LP shares & \done \\
+            Cross-chain messaging & 7 action codes, allow-listed senders & \done \\
+            Global state manager & Per-chain ledger, 5 managers & \done \\
+            State mirroring & Read/write role split & \done \\
+            Interest \& risk engine & Index accrual, kinked curve, LTV & \done \\
+            Liquidation automation & Automation upkeep, penalty escalation & \done \\
+            Demo harness & Two chains, relayer, one command & \done \\
+            REST API + indexer & 13 route groups, reorg detection & \integrated \\
+            Web application & Dashboard, markets, borrow, portfolio & \integrated \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+    \vspace{-0.05cm}
+    {\small \textbf{Evidence:} live two-chain demo $\cdot$ integration tests on forked Sepolia \& Arbitrum Sepolia $\cdot$ GitHub history}
+\end{frame}
+
+% --- RUBRIC 2b: PENDING & PLANNED ---
+\begin{frame}{2. Implementation Progress --- Pending \& Planned Modules}
+    \framesubtitle{Remaining scope for Phase 2}
+    \vspace{-0.1cm}
+    \begin{table}
+        \centering
+        \footnotesize
+        \renewcommand{\arraystretch}{1.1}
+        \begin{tabular}{p{3.5cm} p{6.1cm} c}
+            \toprule
+            \textbf{Module} & \textbf{Scope} & \textbf{Status} \\
+            \midrule
+            \multicolumn{3}{l}{\textbf{\textcolor{amritaMaroon}{Core protocol}}} \\
+            Security hardening & Access audit, oracle staleness, pause paths & \wip \\
+            Gas \& size optimisation & Contract size, storage packing & \wip \\
+            Accounting corrections & Utilisation ratio, borrowed aggregate & \wip \\
+            Configurable loan tenor & Support shorter instrument maturities & \planned \\
+            \midrule
+            \multicolumn{3}{l}{\textbf{\textcolor{amritaMaroon}{Real-World Asset collateral}}} \\
+            RWA collateral path & Pledge without transfer of custody & \planned \\
+            Lien registry & On-chain register of charges & \planned \\
+            ERC-3643 integration & Freeze-in-place via issuer agent rights & \planned \\
+            Asset valuation & NAV oracle for maturing instruments & \planned \\
+            Per-asset risk params & Distinct LTV per asset class & \planned \\
+            Cross-chain lien mirroring & Lien state propagated to satellites & \planned \\
+            Foreclosure \& realisation & Trustee-initiated enforcement & \planned \\
+            Holder eligibility & Identity registry for restricted assets & \planned \\
+            ZK eligibility proofs & Privacy-preserving accreditation & \planned \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+\end{frame}
+
+% --- RUBRIC 3: TECHNICAL KNOWLEDGE ---
+\section{Technical Knowledge}
+\begin{frame}{3. Technical Knowledge \& Design Decisions}
+    \framesubtitle{Rubric: Understanding of Architecture, Implementation \& Tech Stack (5 Marks)}
+    \small
+    \begin{columns}
+        \column{0.5\textwidth}
+        \textbf{Stack choices}
+        \begin{itemize}
+            \item \textbf{CCIP} --- needed messages, not token transport
+            \item \textbf{Foundry} --- Solidity tests, chain forking
+            \item \textbf{SQLite} --- single writer, embedded, zero-ops
+        \end{itemize}
+        \vspace{0.25cm}
+        \textbf{Patterns}
+        \begin{itemize}
+            \item Facade + delegation
+            \item Proxy (EIP-1967) --- upgrade, keep storage
+            \item Custody segregated from accounting
+        \end{itemize}
+
+        \column{0.5\textwidth}
+        \textbf{Security}
+        \begin{itemize}
+            \item Sender allow-listing on every message
+            \item Readers $\neq$ writers on mirrors
+            \item Reentrancy guards, checks-effects-interactions
+            \item Custom errors --- cheap, decodable
+        \end{itemize}
+        \vspace{0.25cm}
+        \textbf{Performance}
+        \begin{itemize}
+            \item O(1) interest, no per-loan loops
+            \item Append-only enum --- in-flight messages safe
+            \item Indexed reads decouple UI from chain
+        \end{itemize}
+    \end{columns}
+\end{frame}
+
+% --- DEMO & VALIDATION ---
+\begin{frame}{Demonstration and Validation}
+    \small
+    \begin{columns}
+        \column{0.5\textwidth}
+        \textbf{Live demo}
+        \begin{itemize}
+            \item One command $\to$ 2 chains, relayer, API, web app
+            \item Supply on hub $\to$ collateral on satellite $\to$ borrow on hub
+            \item Messages visible in live status panel
+        \end{itemize}
+        \vspace{0.25cm}
+        \textbf{Validation}
+        \begin{itemize}
+            \item Tests on \textbf{forked} Sepolia + Arbitrum Sepolia
+            \item Real deployed CCIP contracts, not mocks
+            \item Local demo swaps router only --- protocol unchanged
+        \end{itemize}
+
+        \column{0.5\textwidth}
+        \textbf{Challenges solved}
+        \begin{itemize}
+            \item \textbf{Chain-ID collision} --- local node under a live network ID made wallets price real gas
+            \item \textbf{Proxy trap} --- \code{constant} chain IDs live in implementation bytecode; moved to storage
+            \item \textbf{Async reads} --- satellite state not visible at tx return; client polls
+            \item \textbf{Library bugs} --- 2 defects in CCIP simulator found and patched
+        \end{itemize}
+    \end{columns}
+\end{frame}
+
+% --- RUBRIC 4: ENRICHMENT ---
+\section{Technical Enrichment}
+\begin{frame}{4. Technical Enrichment Activity Choices}
+    \framesubtitle{Professional Online Certification Details (Individual Mandatory: 10--20 Hours)}
+    \begin{itemize}
+        \item \textbf{Individual MOOC / Online Certification Selection:}
+    \end{itemize}
+    \vspace{-0.1cm}
+    \begin{table}
+        \centering
+        \footnotesize
+        \renewcommand{\arraystretch}{1.15}
+        \begin{tabular}{|c|p{2.8cm}|p{5.0cm}|p{2.3cm}|c|}
+            \hline
+            \textbf{S.No} & \textbf{Student Name} & \textbf{Chosen MOOC / Course Title} & \textbf{Platform} & \textbf{Hours} \\
+            \hline
+            1 & Student Name 1 & [Course Title relevant to Project] & Coursera & 15 Hrs \\
+            \hline
+            2 & Student Name 2 & [Course Title relevant to Project] & NPTEL & 20 Hrs \\
+            \hline
+            3 & Student Name 3 & [Course Title relevant to Project] & edX / Coursera & 12 Hrs \\
+            \hline
+            4 & Student Name 4 & [Course Title relevant to Project] & AWS / Google & 16 Hrs \\
+            \hline
+        \end{tabular}
+    \end{table}
+    \vspace{0.15cm}
+    \begin{itemize}
+        \item {\scriptsize \textbf{Requirement:} Each student must complete one approved 10--20 hour online certification from a recognized platform (Coursera, NPTEL, edX, etc.) relevant to the project.}
+    \end{itemize}
+\end{frame}
+
+% --- ROADMAP ---
+\begin{frame}{Remaining Work and Roadmap}
+    \framesubtitle{Path to Phase 2 completion}
+    \small
+    \begin{columns}
+        \column{0.5\textwidth}
+        \textbf{Near term --- core protocol}
+        \begin{itemize}
+            \item Complete security hardening
+            \item Finish accounting corrections
+            \item Gas and contract-size optimisation
+        \end{itemize}
+        \vspace{0.3cm}
+        \textbf{Next --- asset class extension}
+        \begin{itemize}
+            \item Real-world asset collateral track
+            \item Non-custodial pledging model
+            \item Regulatory and eligibility layer
+        \end{itemize}
+
+        \column{0.5\textwidth}
+        \textbf{Evaluation}
+        \begin{itemize}
+            \item Third satellite chain --- prove generalisation
+            \item Gas benchmark: messaging vs bridging
+            \item Latency measurement under load
+        \end{itemize}
+        \vspace{0.3cm}
+        \textbf{Deployment}
+        \begin{itemize}
+            \item External security review
+            \item Public testnet deployment
+        \end{itemize}
+    \end{columns}
+    \vspace{0.35cm}
+    \keypoint{Core lending and cross-chain modules are implemented, integrated and demonstrable end to end.}
+\end{frame}
+
+% --- REFERENCES ---
+\section{References}
+\begin{frame}[allowframebreaks]{References}
+    \bibliographystyle{IEEEtran}
+    \bibliography{ref}
+\end{frame}
+
+% --- THANK YOU ---
+\begin{frame}
+    \centering
+    {\Huge \textbf{\textcolor{amritaMaroon}{Thank You}}}
+\end{frame}
+
+\end{document}
