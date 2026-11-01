@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import {GlobalStateManagerErrors} from "../errors/Errors.sol";
@@ -37,7 +38,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
 
     uint256 private constant LIQUIDATION_PENALTY = 5e16;
 
-
     uint256 private constant PRECISION = 1e18;
 
     // Mirrored to the satellite on liquidation. Settable so a local deployment
@@ -45,11 +45,13 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
     uint256 public ethChainId = 11155111;
     uint256 public arbChainId = 421614;
 
-    function setChainIds(uint256 ethChainId_, uint256 arbChainId_) external onlyOwner {
+    function setChainIds(
+        uint256 ethChainId_,
+        uint256 arbChainId_
+    ) external onlyOwner {
         ethChainId = ethChainId_;
         arbChainId = arbChainId_;
     }
-
 
     event LoanLiquidated(
         address indexed user,
@@ -119,7 +121,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         );
     }
 
-
     modifier isChainRegesitedToCall() {
         if (!s_isAllowedToCall[msg.sender]) {
             revert GlobalStateManagerErrors.GlobalStateManager__InvalidSender(
@@ -170,7 +171,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         return loanManager.readTotalBorrwedPerToken(tokenId);
     }
 
-
     function updateDepositCollateralOfUser(
         uint256 chainId,
         address user,
@@ -219,7 +219,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
             );
     }
 
-
     function mirrorUpdateOfTheUserCollateral(
         address receiver,
         uint256 chainId_,
@@ -256,7 +255,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
             0
         );
     }
-
 
     function updateBorrowLoanDetailsOfUser(
         uint256 chainId,
@@ -375,7 +373,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         );
     }
 
-
     function updateDepositDetailsOfUser(
         uint256 chainId,
         address user,
@@ -469,7 +466,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
         );
     }
 
-
     function updateLPTokenInCirculation(
         uint256 chainId,
         address user,
@@ -517,7 +513,6 @@ contract GlobalStateManager is IGlobalStateManager, Ownable {
                 interestRateManager.getBorrowerIndex(tokenId)
             );
     }
-
 
     function getBorrowerIndex(uint64 tokenId) external view returns (uint256) {
         return interestRateManager.getBorrowerIndex(tokenId);
