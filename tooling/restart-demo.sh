@@ -21,6 +21,11 @@ cd "$ROOT"
 
 # Anvil's deterministic accounts. Index 0 is the deployer and is deliberately
 # not offered: the deploy scripts and seed script both sign as it.
+#
+# Indices 2 and 3 are reserved for the RWA lifecycle, which hardcodes them as
+# the security holder and the security trustee. Seeding the crypto position onto
+# either would make one account play two unrelated roles in the same demo, so
+# only 1 and 4 are offered here.
 KEYS=(
   "" # 0 - reserved for deployment
   "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
@@ -37,7 +42,10 @@ ADDRS=(
 )
 
 IDX="${1:-1}"
-if [ -z "${KEYS[$IDX]:-}" ]; then echo "pick an account index between 1 and 4" >&2; exit 1; fi
+if [ -z "${KEYS[$IDX]:-}" ]; then echo "pick account index 1 or 4" >&2; exit 1; fi
+if [ "$IDX" = "2" ] || [ "$IDX" = "3" ]; then
+  echo "accounts 2 and 3 are reserved for the RWA holder and trustee; use 1 or 4" >&2; exit 1
+fi
 
 say() { printf "\033[35m>\033[0m %s\n" "$1"; }
 
@@ -64,6 +72,16 @@ say "seeding a cross-chain position on account #$IDX"
 DEMO_KEY="${KEYS[$IDX]}" node tooling/scenario.mjs --seed 2>&1 | grep -E "supplied|posted|hub now sees|borrowed|records" || true
 
 printf "\n  \033[35mReady.\033[0m\n"
+say "running the real-world-asset lifecycle"
+if [ -f tooling/rwa.env ]; then
+  # shellcheck disable=SC1091
+  . tooling/rwa.env
+  node tooling/rwa-scenario.mjs 2>&1 \
+    | grep -E "appointed|balance unchanged|refused with|crossed as a message|borrowed|discharged|moves freely|took exactly|turned back|Lifecycle" || true
+else
+  echo "  tooling/rwa.env missing -- deploy-rwa.mjs did not run; skipping" >&2
+fi
+
 cat <<BANNER
 
     Web app     http://localhost:3000
@@ -75,5 +93,11 @@ cat <<BANNER
       ${KEYS[$IDX]}
 
     Network: AstraLend Hub, RPC http://127.0.0.1:8545, chain id 424242
+
+    Crypto collateral page   http://localhost:3000/app/portfolio
+    RWA collateral page      http://localhost:3000/app/collateral
+
+    RWA holder   0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC  (anvil #2)
+    RWA trustee  0x90F79bf6EB2c4f870365E785982E1f101E93b906  (anvil #3)
 
 BANNER
